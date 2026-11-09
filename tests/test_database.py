@@ -233,6 +233,11 @@ class TestDatabase(unittest.TestCase):
                     if r["track"] == "Nordschleife")
         self.assertEqual(nord["n_players"], 2)
 
+    def test_totals(self):
+        """Zaehler fuer die Statusleiste (0.4.3)."""
+        self.db.ingest_folder(SAMPLES)
+        self.assertEqual(self.db.totals(), (4, 16))  # SP 4+4, Sachsenring 2+2, Hockenheim 2+2
+
 
 if __name__ == "__main__":
     unittest.main(verbosity=2)

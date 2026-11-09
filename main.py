@@ -66,10 +66,11 @@ class UpdateDownloadWorker(QtCore.QThread):
 
 
 class GenericTableModel(QtCore.QAbstractTableModel):
-    def __init__(self, columns, rows):
+    def __init__(self, columns, rows, mono_cols=()):
         super().__init__()
         self.columns = columns
         self.rows = rows or []
+        self.mono_cols = set(mono_cols)   # Spalten in technischer Schrift
 
     def rowCount(self, *a):
         return len(self.rows)
@@ -83,14 +84,20 @@ class GenericTableModel(QtCore.QAbstractTableModel):
         return None
 
     def data(self, index, role=QtCore.Qt.DisplayRole):
-        if not index.isValid() or role != QtCore.Qt.DisplayRole:
+        if not index.isValid():
             return None
-        return str(self.rows[index.row()][index.column()])
+        if role == QtCore.Qt.DisplayRole:
+            return str(self.rows[index.row()][index.column()])
+        if role == QtCore.Qt.FontRole and index.column() in self.mono_cols:
+            f = QtGui.QFont("Consolas")
+            f.setStyleHint(QtGui.QFont.Monospace)
+            return f
+        return None
 
 
 class SessionTableModel(GenericTableModel):
     def __init__(self, rows):
-        super().__init__(COL_SESSIONS, [])
+        super().__init__(COL_SESSIONS, [], mono_cols=(0, 3, 4))
         self.set_rows(rows)
 
     def set_rows(self, rows):
@@ -342,6 +349,10 @@ class MainWindow(QtWidgets.QMainWindow):
         self._build_stats_tab()
         self._build_menu()
 
+        self.lbl_perm = QtWidgets.QLabel("")
+        self.statusBar().addPermanentWidget(self.lbl_perm)
+        self._update_status_totals()
+
         self.watch_timer = QtCore.QTimer(self)
         self.watch_timer.setInterval(5000)
         self.watch_timer.timeout.connect(self.check_folder)
@@ -366,7 +377,7 @@ class MainWindow(QtWidgets.QMainWindow):
         self.btn_rescan.clicked.connect(self.rescan)
         top.addWidget(self.btn_rescan)
         self.lbl_dir = QtWidgets.QLabel("")
-        self.lbl_dir.setStyleSheet("color: #8f8f99;")
+        self.lbl_dir.setStyleSheet("color: #9a9aa4;")
         top.addWidget(self.lbl_dir, 1)
         v.addLayout(top)
 
@@ -396,7 +407,7 @@ class MainWindow(QtWidgets.QMainWindow):
         v.addLayout(filt)
 
         self.tbl_sessions = QtWidgets.QTableView()
-        self.tbl_sessions.setAlternatingRowColors(True)
+        self.tbl_sessions.setAlternatingRowColors(False)
         self.sess_model = SessionTableModel([])
         self.tbl_sessions.setModel(self.sess_model)
         self.tbl_sessions.setSelectionBehavior(QtWidgets.QTableView.SelectRows)
@@ -411,8 +422,9 @@ class MainWindow(QtWidgets.QMainWindow):
         lbl_detail.setObjectName("sectionTitle")
         v.addWidget(lbl_detail)
         self.tbl_entries = QtWidgets.QTableView()
-        self.tbl_entries.setAlternatingRowColors(True)
-        self.entries_model = GenericTableModel(COL_ENTRIES, [])
+        self.tbl_entries.setAlternatingRowColors(False)
+        self.entries_model = GenericTableModel(COL_ENTRIES, [],
+                                              mono_cols=(0, 3, 4, 5))
         self.tbl_entries.setModel(self.entries_model)
         self.tbl_entries.horizontalHeader().setStretchLastSection(True)
         v.addWidget(self.tbl_entries, 1)
@@ -457,14 +469,16 @@ class MainWindow(QtWidgets.QMainWindow):
             box = QtWidgets.QFrame()
             box.setFixedHeight(64)
             box.setStyleSheet(
-                "QFrame { background: #1a1a1f; border: 1px solid #26262c; }")
+                "QFrame { background: #202027; border: 1px solid #33333d; }")
             lay = QtWidgets.QVBoxLayout(box)
             k = QtWidgets.QLabel(key)
-            k.setStyleSheet("color: #8f8f99; font-size: 11px; font-weight: 700; "
+            k.setStyleSheet("color: #9a9aa4; font-size: 11px; font-weight: 700; "
                              "background: transparent;")
             val = QtWidgets.QLabel("–")
-            val.setStyleSheet("color: #f1f1f3; font-size: 17px; font-weight: 800; "
-                              "background: transparent;")
+            is_rec = key in ("Renn-Rekord", "Allzeit-Bestzeit")
+            val.setStyleSheet(
+                "color: %s; font-size: 17px; font-weight: 800; "
+                "background: transparent;" % ("#e8c34a" if is_rec else "#e8e8ec"))
             lay.addWidget(k)
             lay.addWidget(val)
             tiles.addWidget(box)
@@ -473,8 +487,9 @@ class MainWindow(QtWidgets.QMainWindow):
         v.addLayout(tiles)
 
         self.tbl_laps = QtWidgets.QTableView()
-        self.tbl_laps.setAlternatingRowColors(True)
+        self.tbl_laps.setAlternatingRowColors(False)
         self.laps_model = LapTableModel()
+        self.laps_model.mono_cols = set(range(len(COL_LAPS)))
         self.tbl_laps.setModel(self.laps_model)
         self.tbl_laps.horizontalHeader().setStretchLastSection(True)
         v.addWidget(self.tbl_laps, 1)
@@ -494,8 +509,8 @@ class MainWindow(QtWidgets.QMainWindow):
         combo_row.addStretch(1)
         v.addLayout(combo_row)
         self.tbl_bests = QtWidgets.QTableView()
-        self.tbl_bests.setAlternatingRowColors(True)
-        self.bests_model = GenericTableModel(COL_BESTS, [])
+        self.tbl_bests.setAlternatingRowColors(False)
+        self.bests_model = GenericTableModel(COL_BESTS, [], mono_cols=(3, 4, 5))
         self.tbl_bests.setModel(self.bests_model)
         self.tbl_bests.horizontalHeader().setStretchLastSection(True)
         v.addWidget(self.tbl_bests, 1)
@@ -515,14 +530,16 @@ class MainWindow(QtWidgets.QMainWindow):
             box = QtWidgets.QFrame()
             box.setFixedHeight(74)
             box.setStyleSheet(
-                "QFrame { background: #1a1a1f; border: 1px solid #26262c; }")
+                "QFrame { background: #202027; border: 1px solid #33333d; }")
             lay = QtWidgets.QVBoxLayout(box)
             k = QtWidgets.QLabel(key)
-            k.setStyleSheet("color: #8f8f99; font-size: 11px; font-weight: 700; "
+            k.setStyleSheet("color: #9a9aa4; font-size: 11px; font-weight: 700; "
                             "background: transparent;")
             val = QtWidgets.QLabel("–")
-            val.setStyleSheet("color: #f1f1f3; font-size: 19px; font-weight: 800; "
-                               "background: transparent;")
+            is_rec = key == "Allzeit-Bestzeit"
+            val.setStyleSheet(
+                "color: %s; font-size: 19px; font-weight: 800; "
+                "background: transparent;" % ("#e8c34a" if is_rec else "#e8e8ec"))
             lay.addWidget(k)
             lay.addWidget(val)
             grid.addWidget(box)
@@ -546,8 +563,8 @@ class MainWindow(QtWidgets.QMainWindow):
         lbl_dnf.setObjectName("sectionTitle")
         v.addWidget(lbl_dnf)
         self.tbl_dnf = QtWidgets.QTableView()
-        self.tbl_dnf.setAlternatingRowColors(True)
-        self.dnf_model = GenericTableModel(COL_DNF, [])
+        self.tbl_dnf.setAlternatingRowColors(False)
+        self.dnf_model = GenericTableModel(COL_DNF, [], mono_cols=(1, 2, 3))
         self.tbl_dnf.setModel(self.dnf_model)
         self.tbl_dnf.horizontalHeader().setStretchLastSection(True)
         self.tbl_dnf.setMaximumHeight(190)
@@ -608,10 +625,21 @@ class MainWindow(QtWidgets.QMainWindow):
         added, skipped, errors = self.db.ingest_folder(self.results_dir)
         self._last_dir_stamp = self._dir_stamp()
         self.refresh()
+        self._update_status_totals()
         if not silent or added:
             self.statusBar().showMessage(
                 f"Neu: {added} Sitzungen, bekannt: {skipped}, "
                 f"unlesbar: {errors} ({self.results_dir})", 10000)
+
+    def _update_status_totals(self):
+        """Daueranzeige in der Statusleiste (Sitzungen/Runden/Datenbank)."""
+        try:
+            n_s, n_l = self.db.totals()
+            self.lbl_perm.setText(
+                f"{n_s} Sitzungen · {n_l} Runden erfasst · "
+                f"Datenbank: {os.path.basename(self.db_path)}")
+        except Exception:
+            self.lbl_perm.setText("")
 
     def refresh(self):
         self._reload_driver_boxes()

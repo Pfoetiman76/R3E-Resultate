@@ -316,6 +316,13 @@ class Database:
         q += "ORDER BY s.timestamp DESC LIMIT 500"
         return self.conn.execute(q, params).fetchall()
 
+    def totals(self):
+        """Gesamtzaehler fuer die Statusleiste: (Sitzungen, Runden gesamt)."""
+        n_s = self.conn.execute("SELECT COUNT(*) FROM sessions").fetchone()[0]
+        n_l = self.conn.execute(
+            "SELECT COALESCE(SUM(laps), 0) FROM entries").fetchone()[0]
+        return n_s, n_l
+
     # ------------------------------------------------ 0.4.1 Streckenrekorde --
 
     def track_records(self, track, layout=""):
