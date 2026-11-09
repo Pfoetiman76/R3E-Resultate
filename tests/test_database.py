@@ -46,7 +46,6 @@ class TestDatabase(unittest.TestCase):
         self.db.ingest_folder(SAMPLES)
         bests = self.db.personal_bests("Marcel Wijnandts")
         self.assertTrue(all(b["name"] == "Marcel Wijnandts" for b in bests))
-        # Nordschleife 512340, Hockenheim 59870, Sachsenring-Quali 79123
         got = {(b["track"], b["best_ms"]) for b in bests}
         self.assertIn(("Nordschleife", 512340), got)
         self.assertIn(("Hockenheim", 59870), got)
@@ -59,9 +58,78 @@ class TestDatabase(unittest.TestCase):
         self.assertIn("Fahrer B", drivers)
         stats, wins = self.db.stats_summary("Marcel Wijnandts")
         self.assertGreaterEqual(stats["sessions"], 2)
-        self.assertEqual(stats["races"], 3)  # SP Race1 + Sachsenring-Rennen + Hockenheim
-        self.assertEqual(wins, 2)  # SP-Race1 + Hockenheim (in Samples Pos. 1)
+        self.assertEqual(stats["races"], 3)
+        self.assertEqual(wins, 2)
+        self.assertEqual(stats["podium"], 3)   # Pos. 1/2/2 in den drei Rennen
+        self.assertEqual(stats["finishes"], 3)  # alle Finished
         self.assertGreaterEqual(stats["total_laps"], 8)
+
+    # --------------------------------------------------------- 0.3.0 NEU --
+
+    def test_laps_stored(self):
+        """Sektorenzeiten aus Server-XML/JSON muessen in der laps-Tabelle landen."""
+        self.db.ingest_folder(SAMPLES)
+        with_laps = self.db.sessions_with_laps()
+        self.assertEqual(len(with_laps), 2)  # Sachsenring-Rennen + Hockenheim
+        xml = next(r for r in with_laps if r["track"] == "Hockenheim")
+        laps = self.db.laps_for_session(xml["id"])
+        self.assertEqual(len(laps), 4)  # 2 Fahrer x 2 Runden
+        marcel = [l for l in laps if l["name"] == "Marcel Wijnandts"]
+        self.assertEqual(len(marcel), 2)
+        self.assertEqual(marcel[0]["lap_time_ms"], 61000)
+        self.assertEqual([marcel[0]["s1_ms"], marcel[0]["s2_ms"], marcel[0]["s3_ms"]],
+                         [20000, 20000, 21000])
+
+    def test_sessions_with_laps_excludes_sp(self):
+        """SP-Ergebnisse haben keine Rundendetails -> nicht in der Runden-Liste."""
+        self.db.ingest_folder(SAMPLES)
+        tracks = {r["track"] for r in self.db.sessions_with_laps()}
+        self.assertNotIn("Nordschleife", tracks)
+        self.assertIn("Sachsenring", tracks)
+
+    def test_search_filter(self):
+        self.db.ingest_folder(SAMPLES)
+        hits = self.db.sessions(search="Hockenheim")
+        self.assertEqual(len(hits), 1)
+        self.assertEqual(hits[0]["track"], "Hockenheim")
+        self.assertEqual(len(self.db.sessions(search="gibtsnicht")), 0)
+        races = self.db.sessions(session_type="Race")
+        self.assertEqual({r["session_type"] for r in races}, {"Race", "Race1"})
+        by_driver = self.db.sessions(driver="Fahrer B")
+        self.assertTrue(all(r["n_players"] >= 1 for r in by_driver))
+        self.assertEqual(len(by_driver), 2)  # Qualify + Race Sachsenring
+
+    def test_progression(self):
+        self.db.ingest_folder(SAMPLES)
+        prog = self.db.progression("Hockenheim", "GP", driver="Marcel Wijnandts")
+        self.assertEqual(len(prog), 1)
+        self.assertEqual(prog[0]["best_ms"], 59870)
+        prog_all = self.db.progression("Hockenheim", "GP")
+        self.assertEqual(prog_all[0]["best_ms"], 59870)
+
+    def test_dnf_summary_and_sessions(self):
+        """Sachsenring-Rennen bekommt einen kuenstlichen DNF zur Pruefung."""
+        self.db.ingest_folder(SAMPLES)
+        s = next(r for r in self.db.sessions() if r["session_type"] == "Race"
+                 and r["track"] == "Sachsenring")
+        self.db.conn.execute(
+            "UPDATE entries SET finish_status = 'Accident' "
+            "WHERE session_id = ? AND name = 'Marcel Wijnandts'", (s["id"],))
+        self.db.conn.commit()
+        summary = self.db.dnf_summary("Marcel Wijnandts")
+        self.assertEqual(len(summary), 1)
+        self.assertEqual(summary[0]["starts"], 3)
+        self.assertEqual(summary[0]["dnfs"], 1)
+        self.assertAlmostEqual(summary[0]["finish_rate"], 66.7, places=1)
+        dnf_list = self.db.dnf_sessions("Marcel Wijnandts")
+        self.assertEqual(len(dnf_list), 1)
+        self.assertEqual(dnf_list[0]["finish_status"], "Accident")
+
+    def test_tracks_listing(self):
+        self.db.ingest_folder(SAMPLES)
+        combos = {(r["track"], r["layout"]) for r in self.db.tracks()}
+        self.assertIn(("Hockenheim", "GP"), combos)
+        self.assertIn(("Nordschleife", "VLN-Gesamtstrecke"), combos)
 
 
 if __name__ == "__main__":

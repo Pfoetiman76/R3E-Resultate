@@ -3,13 +3,19 @@
 Eigenständige Begleit-App für **RaceRoom Racing Experience** – im Stil von „ACC Results Companion“:
 Sie liest die von RaceRoom erzeugten Ergebnisdateien automatisch ein und bietet eine dauerhafte Historie aller Sitzungen samt persönlichen Bestzeiten. Optik und Update-Mechanik folgen dem Vorbild von PitBoss R3E.
 
-## Funktionen (Version 0.2.0)
+## Funktionen (Version 0.3.0)
 
 - Automatische Überwachung des RaceRoom-Ergebnisordners (alle 5 Sekunden); neue Sitzungen erscheinen ohne Zutun
 - Sitzungshistorie: Datum, Typ, Strecke, Fahrerzahl, Sitzungs-Bestzeit; Klick zeigt das vollständige Ergebnis
 - Bestzeiten pro Fahrer / Strecke / Fahrzeug
 - Statistik-Kopfzeile: Sitzungen, Renneinsätze, Runden gesamt, Siege (nur Rennen), Allzeit-Bestzeit
 - Dunkles PitBoss-Theme (RaceRoom-Rot-Akzent, Fusion-Stil)
+- Suche & Filter in der Sitzungsliste (freie Suche nach Strecke/Layout/Typ, Filter nach Sitzungstyp und Fahrer)
+- Runden-für-Runden-Ansicht mit Sektorenzeiten und Delta zur besten Runde (Server-/Multiplayer-Ergebnisse)
+- CSV- und HTML-Export der ausgewählten Sitzung (Semikolon-CSV, dunkel gestaltetes HTML)
+- Statistik-Tab: Dashboard-Kacheln (Rennen, Siege, Podium, Zielquote, Runden, Allzeit-Bestzeit)
+- Bestzeiten-Entwicklung als Diagramm je Strecke (eigene QPainter-Chart, keine Zusatzabhängigkeit)
+- Unfall-/Ausfall-Analyse: DNF-Quote je Fahrer und Ausfall-Historie (nur Rennen)
 - Automatische Update-Prüfung beim Start + „Hilfe → Nach Updates suchen …“ mit Ein-Klick-Download des Installers
 - SQLite-Datenbank – einmal eingelesen bleibt alles dauerhaft gespeichert; Duplikate werden erkannt
 - Unterstützte Formate:
@@ -51,7 +57,8 @@ Klick-Weg: GitHub → **Releases** → **Draft a new release** → Tag `v0.2.0` 
 
 | Datei | Zweck |
 |---|---|
-| `main.py` | PySide6-Oberfläche (Tabs: Sitzungen, Bestzeiten; Update-Dialoge) |
+| `main.py` | PySide6-Oberfläche (Tabs: Sitzungen, Runden, Bestzeiten, Statistik; Export; Update-Dialoge) |
+| `rrc/charts.py` | Bestzeiten-Diagramm (QPainter, ohne Zusatzpakete) |
 | `rrc/theme.py` | Dunkles PitBoss-Theme (QSS, RaceRoom-Rot-Akzent) |
 | `rrc/parser.py` | Formatunabhängiger Parser (SP-JSON, Dedicated-JSON, Multiplayer-XML) |
 | `rrc/database.py` | SQLite-Speicher mit Duplikaterkennung (Digest) |
@@ -61,9 +68,11 @@ Klick-Weg: GitHub → **Releases** → **Draft a new release** → Tag `v0.2.0` 
 | `installer/setup.iss` | Inno-Setup-Installer |
 | `installer/r3e_resultate.spec` | PyInstaller-Spezifikation |
 | `.github/workflows/release.yml` | CI: Tests → EXE → Installer → Release |
-| `tests/` | 17 Unit-Tests (Parser + Datenbank) |
+| `tests/` | 23 Unit-Tests (Parser + Datenbank) |
 
 Tests ausführen: `python -m unittest discover -s tests`
+
+Hinweis: Rundendetails (Runden-/Sektorenzeiten) werden erst mit Version 0.3.0 in der Datenbank gespeichert; Sitzungen, die mit 0.2.0 bereits eingelesen wurden, enthalten keine Rundendaten, bis Sie die Datenbank löschen (sie wird beim nächsten Start komplett neu aufgebaut — alle Ergebnisdateien bleiben im RaceRoom-Ordner erhalten).
 
 ## Technische Hinweise
 
@@ -73,7 +82,5 @@ Tests ausführen: `python -m unittest discover -s tests`
 
 ## Geplante Erweiterungen
 
-- Runden-für-Runden-Ansicht der Server-Ergebnisse (Sektorenzeiten liegen bereits im Parser)
-- CSV/HTML-Export einzelner Sitzungen
-- Unfall-/Ausfallstatistik
-- Kraftstoffprognose aus historischen Runden
+- Kraftstoffprognose aus historischen Runden (benötigt hinterlegbare Verbrauchswerte je Auto)
+- Bestzeiten-Vergleich gegen Mitfahrer über mehrere Sitzungen

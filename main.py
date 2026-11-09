@@ -2,13 +2,16 @@
 
 A standalone companion app for RaceRoom Racing Experience:
 - automatically records session results from the local results folder
-- session history with full result details
-- personal best times per track/layout/car
-- basic statistics
+- session history with full result details, search and filters
+- lap-by-lap view with sector times (server results)
+- personal best times per track/layout/car + progression chart
+- statistics dashboard with finish/DNF analysis
 - dark PitBoss-style theme, update check over GitHub Releases
 
 Run: python main.py
 """
+import csv
+import html
 import os
 import subprocess
 import sys
@@ -16,6 +19,7 @@ import sys
 from PySide6 import QtCore, QtGui, QtWidgets
 
 import updater
+from rrc.charts import LineChartWidget
 from rrc.database import Database
 from rrc.models import APP_NAME, APP_VERSION, format_time_ms
 from rrc.paths import default_app_dir, default_results_dir, default_db_path
@@ -24,11 +28,13 @@ from rrc.theme import apply_dark_theme
 COL_SESSIONS = ["Datum", "Typ", "Strecke", "Fahrer", "Bestzeit"]
 COL_ENTRIES = ["Pos.", "Fahrer", "Fahrzeug", "Runden", "Beste Runde", "Renzeit", "Status"]
 COL_BESTS = ["Fahrer", "Strecke", "Fahrzeug", "Bestzeit", "Fahrten", "Zuletzt"]
+COL_LAPS = ["Runde", "Zeit", "Sektor 1", "Sektor 2", "Sektor 3", "Delta zur besten"]
+COL_DNF = ["Fahrer", "Rennstarts", "DNF", "Zielquote %"]
 
 
 class UpdateCheckWorker(QtCore.QThread):
     """Update-Pruefung im Hintergrund (blockiert die UI nicht)."""
-    result = QtCore.Signal(object, str)  # (info | None, fehler)
+    result = QtCore.Signal(object, str)
 
     def run(self):
         try:
@@ -38,9 +44,8 @@ class UpdateCheckWorker(QtCore.QThread):
 
 
 class UpdateDownloadWorker(QtCore.QThread):
-    """Laedt den Installer im Hintergrund und meldet Fortschritt."""
     progress = QtCore.Signal(int, int)
-    finished_result = QtCore.Signal(str, str)  # (pfad, fehler)
+    finished_result = QtCore.Signal(str, str)
 
     def __init__(self, url, dest, parent=None):
         super().__init__(parent)
@@ -54,41 +59,6 @@ class UpdateDownloadWorker(QtCore.QThread):
             self.finished_result.emit(self.dest, "")
         except Exception as e:
             self.finished_result.emit("", str(e))
-
-
-class SessionTableModel(QtCore.QAbstractTableModel):
-    def __init__(self, rows):
-        super().__init__()
-        self.rows = rows or []
-
-    def rowCount(self, *a):
-        return len(self.rows)
-
-    def columnCount(self, *a):
-        return len(COL_SESSIONS)
-
-    def headerData(self, sec, orient, role=QtCore.Qt.DisplayRole):
-        if role == QtCore.Qt.DisplayRole and orient == QtCore.Qt.Horizontal:
-            return COL_SESSIONS[sec]
-        return None
-
-    def data(self, index, role=QtCore.Qt.DisplayRole):
-        if not index.isValid() or role != QtCore.Qt.DisplayRole:
-            return None
-        r = self.rows[index.row()]
-        c = index.column()
-        if c == 0:
-            return r["timestamp"]
-        if c == 1:
-            return r["session_type"]
-        if c == 2:
-            full = r["track"] + ((" - " + r["layout"]) if r["layout"] else "")
-            return full
-        if c == 3:
-            return str(r["n_players"])
-        if c == 4:
-            return format_time_ms(r["session_best_ms"])
-        return None
 
 
 class GenericTableModel(QtCore.QAbstractTableModel):
@@ -114,34 +84,87 @@ class GenericTableModel(QtCore.QAbstractTableModel):
         return str(self.rows[index.row()][index.column()])
 
 
+class SessionTableModel(GenericTableModel):
+    def __init__(self, rows):
+        super().__init__(COL_SESSIONS, [])
+        self.set_rows(rows)
+
+    def set_rows(self, rows):
+        data = []
+        for r in rows:
+            full = r["track"] + ((" - " + r["layout"]) if r["layout"] else "")
+            data.append([r["timestamp"], r["session_type"], full,
+                         r["n_players"], format_time_ms(r["session_best_ms"])])
+        self.beginResetModel()
+        self.rows = data
+        self.endResetModel()
+        self._raw = list(rows)
+
+
 class MainWindow(QtWidgets.QMainWindow):
     def __init__(self):
         super().__init__()
         self.setWindowTitle(f"{APP_NAME} {APP_VERSION}")
-        self.resize(1100, 640)
+        self.resize(1180, 720)
 
         self.results_dir = default_results_dir()
         self.db_path = default_db_path()
         self.db = Database(self.db_path)
-        self.driver = ""
         self._last_dir_stamp = None
+        self._current_entries = []   # entries of the selected session (for export)
 
         self.tabs = QtWidgets.QTabWidget()
         self.setCentralWidget(self.tabs)
+        self._build_sessions_tab()
+        self._build_laps_tab()
+        self._build_bests_tab()
+        self._build_stats_tab()
+        self._build_menu()
 
-        # --- Tab: Sitzungen ---
+        self.watch_timer = QtCore.QTimer(self)
+        self.watch_timer.setInterval(5000)
+        self.watch_timer.timeout.connect(self.check_folder)
+        self.watch_timer.start()
+
+        self.lbl_dir.setText(self.results_dir)
+        self.rescan(silent=True)
+        self._auto_check_updates()
+
+    # ------------------------------------------------------------- Tabs --
+
+    def _build_sessions_tab(self):
         page = QtWidgets.QWidget()
-        page.setObjectName("rootBg")
         v = QtWidgets.QVBoxLayout(page)
+
+        top = QtWidgets.QHBoxLayout()
         self.btn_rescan = QtWidgets.QPushButton("Jetzt einlesen")
         self.btn_rescan.setObjectName("primary")
         self.btn_rescan.clicked.connect(self.rescan)
-        bar = QtWidgets.QHBoxLayout()
-        bar.addWidget(self.btn_rescan)
+        top.addWidget(self.btn_rescan)
         self.lbl_dir = QtWidgets.QLabel("")
         self.lbl_dir.setStyleSheet("color: #8f8f99;")
-        bar.addWidget(self.lbl_dir, 1)
-        v.addLayout(bar)
+        top.addWidget(self.lbl_dir, 1)
+        v.addLayout(top)
+
+        filt = QtWidgets.QHBoxLayout()
+        filt.addWidget(QtWidgets.QLabel("Suche:"))
+        self.ed_search = QtWidgets.QLineEdit()
+        self.ed_search.setPlaceholderText("Strecke, Layout, Sitzungstyp …")
+        self.ed_search.textChanged.connect(self.refresh_sessions)
+        filt.addWidget(self.ed_search, 1)
+        filt.addWidget(QtWidgets.QLabel("Typ:"))
+        self.cmb_type = QtWidgets.QComboBox()
+        for t in ("Alle", "Race", "Qualify", "Practice"):
+            self.cmb_type.addItem(t)
+        self.cmb_type.currentTextChanged.connect(self.refresh_sessions)
+        filt.addWidget(self.cmb_type)
+        filt.addWidget(QtWidgets.QLabel("Fahrer:"))
+        self.cmb_driver_sessions = QtWidgets.QComboBox()
+        self.cmb_driver_sessions.setMinimumWidth(180)
+        self.cmb_driver_sessions.currentTextChanged.connect(self.refresh_sessions)
+        filt.addWidget(self.cmb_driver_sessions)
+        v.addLayout(filt)
+
         self.tbl_sessions = QtWidgets.QTableView()
         self.tbl_sessions.setAlternatingRowColors(True)
         self.sess_model = SessionTableModel([])
@@ -153,6 +176,7 @@ class MainWindow(QtWidgets.QMainWindow):
         self.tbl_sessions.setColumnWidth(2, 320)
         self.tbl_sessions.selectionModel().selectionChanged.connect(self.on_session_selected)
         v.addWidget(self.tbl_sessions, 1)
+
         lbl_detail = QtWidgets.QLabel("Ergebnisdetails:")
         lbl_detail.setObjectName("sectionTitle")
         v.addWidget(lbl_detail)
@@ -162,33 +186,122 @@ class MainWindow(QtWidgets.QMainWindow):
         self.tbl_entries.setModel(self.entries_model)
         self.tbl_entries.horizontalHeader().setStretchLastSection(True)
         v.addWidget(self.tbl_entries, 1)
+
+        exp = QtWidgets.QHBoxLayout()
+        self.btn_csv = QtWidgets.QPushButton("Auswahl als CSV exportieren …")
+        self.btn_csv.clicked.connect(self.export_csv)
+        exp.addWidget(self.btn_csv)
+        self.btn_html = QtWidgets.QPushButton("Auswahl als HTML exportieren …")
+        self.btn_html.clicked.connect(self.export_html)
+        exp.addWidget(self.btn_html)
+        exp.addStretch(1)
+        v.addLayout(exp)
         self.tabs.addTab(page, "Sitzungen")
 
-        # --- Tab: Bestzeiten ---
-        page2 = QtWidgets.QWidget()
-        v2 = QtWidgets.QVBoxLayout(page2)
+    def _build_laps_tab(self):
+        page = QtWidgets.QWidget()
+        v = QtWidgets.QVBoxLayout(page)
+        row = QtWidgets.QHBoxLayout()
+        row.addWidget(QtWidgets.QLabel("Sitzung:"))
+        self.cmb_lap_session = QtWidgets.QComboBox()
+        self.cmb_lap_session.setMinimumWidth(420)
+        self.cmb_lap_session.currentIndexChanged.connect(self.on_lap_session_changed)
+        row.addWidget(self.cmb_lap_session)
+        row.addWidget(QtWidgets.QLabel("Fahrer:"))
+        self.cmb_lap_driver = QtWidgets.QComboBox()
+        self.cmb_lap_driver.setMinimumWidth(200)
+        self.cmb_lap_driver.currentIndexChanged.connect(self.on_lap_driver_changed)
+        row.addWidget(self.cmb_lap_driver)
+        row.addStretch(1)
+        v.addLayout(row)
+        self.lbl_laps_hint = QtWidgets.QLabel(
+            "Runden- und Sektorenzeiten stehen nur in Dedicated-Server- und "
+            "Multiplayer-Ergebnissen zur Verfügung.")
+        self.lbl_laps_hint.setObjectName("hint")
+        v.addWidget(self.lbl_laps_hint)
+        self.tbl_laps = QtWidgets.QTableView()
+        self.tbl_laps.setAlternatingRowColors(True)
+        self.laps_model = GenericTableModel(COL_LAPS, [])
+        self.tbl_laps.setModel(self.laps_model)
+        self.tbl_laps.horizontalHeader().setStretchLastSection(True)
+        v.addWidget(self.tbl_laps, 1)
+        self.tabs.addTab(page, "Runden")
+
+    def _build_bests_tab(self):
+        page = QtWidgets.QWidget()
+        v = QtWidgets.QVBoxLayout(page)
         combo_row = QtWidgets.QHBoxLayout()
         lbl_driver = QtWidgets.QLabel("Fahrer:")
         lbl_driver.setObjectName("sectionTitle")
         combo_row.addWidget(lbl_driver)
         self.cmb_driver = QtWidgets.QComboBox()
         self.cmb_driver.setMinimumWidth(220)
-        self.cmb_driver.currentTextChanged.connect(self.on_driver_changed)
+        self.cmb_driver.currentTextChanged.connect(self.on_driver_changed_full)
         combo_row.addWidget(self.cmb_driver)
         combo_row.addStretch(1)
-        v2.addLayout(combo_row)
+        v.addLayout(combo_row)
         self.tbl_bests = QtWidgets.QTableView()
         self.tbl_bests.setAlternatingRowColors(True)
         self.bests_model = GenericTableModel(COL_BESTS, [])
         self.tbl_bests.setModel(self.bests_model)
         self.tbl_bests.horizontalHeader().setStretchLastSection(True)
-        v2.addWidget(self.tbl_bests, 1)
+        v.addWidget(self.tbl_bests, 1)
         self.lbl_stats = QtWidgets.QLabel("")
         self.lbl_stats.setObjectName("hint")
-        v2.addWidget(self.lbl_stats)
-        self.tabs.addTab(page2, "Bestzeiten")
+        v.addWidget(self.lbl_stats)
+        self.tabs.addTab(page, "Bestzeiten")
 
-        # --- Menü ---
+    def _build_stats_tab(self):
+        page = QtWidgets.QWidget()
+        v = QtWidgets.QVBoxLayout(page)
+
+        # Dashboard-Kacheln
+        grid = QtWidgets.QHBoxLayout()
+        self.tiles = {}
+        for key in ("Rennen", "Siege", "Podium", "Zielquote %", "Runden gesamt", "Allzeit-Bestzeit"):
+            box = QtWidgets.QFrame()
+            box.setFixedHeight(74)
+            box.setStyleSheet(
+                "QFrame { background: #1a1a1f; border: 1px solid #26262c; }")
+            lay = QtWidgets.QVBoxLayout(box)
+            k = QtWidgets.QLabel(key)
+            k.setStyleSheet("color: #8f8f99; font-size: 11px; font-weight: 700; "
+                            "background: transparent;")
+            val = QtWidgets.QLabel("–")
+            val.setStyleSheet("color: #f1f1f3; font-size: 19px; font-weight: 800; "
+                               "background: transparent;")
+            lay.addWidget(k)
+            lay.addWidget(val)
+            grid.addWidget(box)
+            self.tiles[key] = val
+        v.addLayout(grid)
+
+        # Diagramm
+        chart_row = QtWidgets.QHBoxLayout()
+        chart_row.addWidget(QtWidgets.QLabel("Strecke:"))
+        self.cmb_chart_track = QtWidgets.QComboBox()
+        self.cmb_chart_track.setMinimumWidth(320)
+        self.cmb_chart_track.currentIndexChanged.connect(self.on_chart_changed)
+        chart_row.addWidget(self.cmb_chart_track)
+        chart_row.addStretch(1)
+        v.addLayout(chart_row)
+        self.chart = LineChartWidget()
+        v.addWidget(self.chart, 1)
+
+        # Unfall-/Ausfall-Analyse
+        lbl_dnf = QtWidgets.QLabel("Unfälle & Ausfälle (nur Rennen):")
+        lbl_dnf.setObjectName("sectionTitle")
+        v.addWidget(lbl_dnf)
+        self.tbl_dnf = QtWidgets.QTableView()
+        self.tbl_dnf.setAlternatingRowColors(True)
+        self.dnf_model = GenericTableModel(COL_DNF, [])
+        self.tbl_dnf.setModel(self.dnf_model)
+        self.tbl_dnf.horizontalHeader().setStretchLastSection(True)
+        self.tbl_dnf.setMaximumHeight(190)
+        v.addWidget(self.tbl_dnf)
+        self.tabs.addTab(page, "Statistik")
+
+    def _build_menu(self):
         m = self.menuBar().addMenu("&Datei")
         act_settings = QtGui.QAction("Ergebnis-Ordner wählen …", self)
         act_settings.triggered.connect(self.choose_folder)
@@ -208,16 +321,6 @@ class MainWindow(QtWidgets.QMainWindow):
         act_about = QtGui.QAction(f"Über {APP_NAME}", self)
         act_about.triggered.connect(self.show_about)
         mh.addAction(act_about)
-
-        # --- Auto-Watch ---
-        self.watch_timer = QtCore.QTimer(self)
-        self.watch_timer.setInterval(5000)
-        self.watch_timer.timeout.connect(self.check_folder)
-        self.watch_timer.start()
-
-        self.lbl_dir.setText(self.results_dir)
-        self.rescan(silent=True)
-        self._auto_check_updates()
 
     # ------------------------------------------------------------- Logic --
 
@@ -246,35 +349,175 @@ class MainWindow(QtWidgets.QMainWindow):
                 f"unlesbar: {errors} ({self.results_dir})", 10000)
 
     def refresh(self):
-        rows = self.db.sessions()
-        self.sess_model.beginResetModel()
-        self.sess_model.rows = [dict(r) for r in rows]
-        self.sess_model.endResetModel()
-        current = self.cmb_driver.currentText()
-        self.cmb_driver.blockSignals(True)
-        self.cmb_driver.clear()
-        self.cmb_driver.addItem("(alle Fahrer)")
-        for name in self.db.drivers():
-            self.cmb_driver.addItem(name)
-        idx = self.cmb_driver.findText(current) if current else 0
-        self.cmb_driver.setCurrentIndex(max(0, idx))
-        self.cmb_driver.blockSignals(False)
-        self.on_driver_changed(self.cmb_driver.currentText())
+        self._reload_driver_boxes()
+        self.refresh_sessions()
+        self._reload_lap_sessions()
+        self.on_driver_changed_full(self.cmb_driver.currentText())
+        self._reload_tracks()
+
+    def _driver_names(self):
+        return self.db.drivers()
+
+    def _reload_driver_boxes(self):
+        names = self._driver_names()
+        for combo, prev in ((self.cmb_driver, self.cmb_driver.currentText()),
+                            (self.cmb_driver_sessions, self.cmb_driver_sessions.currentText())):
+            combo.blockSignals(True)
+            combo.clear()
+            combo.addItem("(alle Fahrer)")
+            for n in names:
+                combo.addItem(n)
+            combo.setCurrentIndex(max(0, combo.findText(prev)) if prev else 0)
+            combo.blockSignals(False)
+
+    def refresh_sessions(self, *_):
+        search = self.ed_search.text().strip()
+        type_sel = self.cmb_type.currentText()
+        type_ = "" if type_sel in ("", "Alle") else type_sel
+        driver = self.cmb_driver_sessions.currentText()
+        driver = "" if driver.startswith("(") else driver
+        rows = self.db.sessions(search=search, session_type=type_, driver=driver)
+        self.sess_model.set_rows(rows)
+
+    def _session_label(self, r):
+        full = r["track"] + ((" - " + r["layout"]) if r["layout"] else "")
+        return f"{r['timestamp']} · {r['session_type']} · {full}"
 
     def on_session_selected(self, *_):
         indexes = self.tbl_sessions.selectionModel().selectedRows()
         if not indexes:
+            self._current_entries = []
             return
-        row = self.sess_model.rows[indexes[0].row()]
-        rows = []
-        for e in self.db.entries_for(row["id"]):
-            rows.append([e["position"], e["name"], e["vehicle"], e["laps"],
-                         format_time_ms(e["best_lap_ms"]),
-                         format_time_ms(e["race_time_ms"]),
-                         e["finish_status"] or ("Finished" if e["position"] else "")])
+        row = self.sess_model._raw[indexes[0].row()]
+        self._current_entries = [dict(e) for e in self.db.entries_for(row["id"])]
+        rows = [[e["position"], e["name"], e["vehicle"], e["laps"],
+                 format_time_ms(e["best_lap_ms"]),
+                 format_time_ms(e["race_time_ms"]),
+                 e["finish_status"] or ("Finished" if e["position"] else "")]
+                for e in self._current_entries]
         self.entries_model.beginResetModel()
         self.entries_model.rows = rows
         self.entries_model.endResetModel()
+
+    # ------------------------------------------------------------- Runden --
+
+    def _reload_lap_sessions(self):
+        cur = self.cmb_lap_session.currentText()
+        self.cmb_lap_session.blockSignals(True)
+        self.cmb_lap_session.clear()
+        for r in self.db.sessions_with_laps():
+            self.cmb_lap_session.addItem(self._session_label(r), userData=r["id"])
+        if cur:
+            idx = self.cmb_lap_session.findText(cur)
+            if idx >= 0:
+                self.cmb_lap_session.setCurrentIndex(idx)
+        self.cmb_lap_session.blockSignals(False)
+        self.on_lap_session_changed()
+
+    def on_lap_session_changed(self, *_):
+        sid = self.cmb_lap_session.currentData()
+        self.cmb_lap_driver.blockSignals(True)
+        self.cmb_lap_driver.clear()
+        if sid is not None:
+            for e in self.db.entries_for(sid):
+                self.cmb_lap_driver.addItem(e["name"], userData=e["id"])
+        self.cmb_lap_driver.blockSignals(False)
+        self.on_lap_driver_changed()
+
+    def on_lap_driver_changed(self, *_):
+        sid = self.cmb_lap_session.currentData()
+        eid = self.cmb_lap_driver.currentData()
+        rows = []
+        if sid is not None and eid is not None:
+            laps = [dict(l) for l in self.db.laps_for_session(sid) if l["entry_id"] == eid]
+            best = min((l["lap_time_ms"] for l in laps), default=0)
+            for l in laps:
+                delta = l["lap_time_ms"] - best if best else 0
+                sign = "+" if delta > 0 else ""
+                rows.append([l["lap_no"], format_time_ms(l["lap_time_ms"]),
+                             format_time_ms(l["s1_ms"]), format_time_ms(l["s2_ms"]),
+                             format_time_ms(l["s3_ms"]),
+                             "beste" if delta == 0 else f"{sign}{delta / 1000.0:.3f}"])
+        self.laps_model.beginResetModel()
+        self.laps_model.rows = rows
+        self.laps_model.endResetModel()
+
+    # ------------------------------------------------------------- Export --
+
+    def _selected_session(self):
+        indexes = self.tbl_sessions.selectionModel().selectedRows()
+        if not indexes:
+            return None, None
+        row = self.sess_model._raw[indexes[0].row()]
+        return row, self.db.entries_for(row["id"])
+
+    def _export_path(self, suffix):
+        row, entries = self._selected_session()
+        if row is None:
+            QtWidgets.QMessageBox.information(
+                self, "Export", "Bitte wählen Sie zuerst eine Sitzung aus.")
+            return None, None, None
+        full = row["track"] + ((" - " + row["layout"]) if row["layout"] else "")
+        suggestion = f"{row['timestamp'].replace(':', '')}_{full}_{row['session_type']}{suffix}"
+        suggestion = "".join(c if c not in '\\/:*?"<>|' else "_" for c in suggestion)
+        path, _ = QtWidgets.QFileDialog.getSaveFileName(
+            self, "Export speichern", os.path.join(
+                default_app_dir(), suggestion), f"*{suffix}")
+        return row, entries, path
+
+    def export_csv(self):
+        row, entries, path = self._export_path(".csv")
+        if not path:
+            return
+        try:
+            with open(path, "w", newline="", encoding="utf-8-sig") as f:
+                w = csv.writer(f, delimiter=";")
+                w.writerow(["Position", "Fahrer", "Fahrzeug", "Team", "Runden",
+                            "Beste Runde", "Renzeit", "Status"])
+                for e in entries:
+                    w.writerow([e["position"], e["name"], e["vehicle"], e["team"],
+                                e["laps"], format_time_ms(e["best_lap_ms"]),
+                                format_time_ms(e["race_time_ms"]),
+                                e["finish_status"] or ""])
+        except OSError as e:
+            QtWidgets.QMessageBox.warning(self, "Export", f"Export fehlgeschlagen: {e}")
+            return
+        self.statusBar().showMessage(f"CSV exportiert: {path}", 8000)
+
+    def export_html(self):
+        row, entries, path = self._export_path(".html")
+        if not path:
+            return
+        full = row["track"] + ((" - " + row["layout"]) if row["layout"] else "")
+        lines = [
+            "<!DOCTYPE html><html><head><meta charset='utf-8'>",
+            f"<title>R3E Resultate – {html.escape(full)}</title>",
+            "<style>body{font-family:Segoe UI,Arial;background:#0c0c0e;color:#f1f1f3;"
+            "margin:24px}h1{font-size:20px}table{border-collapse:collapse;margin-top:12px}"
+            "th,td{border:1px solid #34343c;padding:6px 12px;text-align:left}"
+            "th{background:#1a1a1f;color:#8f8f99}tr:nth-child(even){background:#131316}"
+            "</style></head><body>",
+            f"<h1>{html.escape(full)} – {html.escape(row['session_type'])}</h1>",
+            f"<p>{html.escape(row['timestamp'])} · Quelle: {html.escape(row['source_file'])}</p>",
+            "<table><tr><th>Pos.</th><th>Fahrer</th><th>Fahrzeug</th><th>Runden</th>"
+            "<th>Beste Runde</th><th>Renzeit</th><th>Status</th></tr>"]
+        for e in entries:
+            lines.append(
+                "<tr><td>{}</td><td>{}</td><td>{}</td><td>{}</td><td>{}</td><td>{}</td><td>{}</td></tr>".format(
+                    e["position"], html.escape(e["name"]), html.escape(e["vehicle"]),
+                    e["laps"], format_time_ms(e["best_lap_ms"]),
+                    format_time_ms(e["race_time_ms"]),
+                    html.escape(e["finish_status"] or "Finished" if e["position"] else "")))
+        lines.append("</table></body></html>")
+        try:
+            with open(path, "w", encoding="utf-8") as f:
+                f.write("\n".join(lines))
+        except OSError as e:
+            QtWidgets.QMessageBox.warning(self, "Export", f"Export fehlgeschlagen: {e}")
+            return
+        self.statusBar().showMessage(f"HTML exportiert: {path}", 8000)
+
+    # --------------------------------------------------------- Bestzeiten --
 
     def on_driver_changed(self, name):
         driver = "" if name.startswith("(") else name
@@ -285,12 +528,61 @@ class MainWindow(QtWidgets.QMainWindow):
         self.bests_model.beginResetModel()
         self.bests_model.rows = rows
         self.bests_model.endResetModel()
-        stats, wins = self.db.stats_summary(driver)
-        total_laps = stats.get("total_laps") or 0
+
+    def _reload_tracks(self):
+        cur = self.cmb_chart_track.currentText()
+        self.cmb_chart_track.blockSignals(True)
+        self.cmb_chart_track.clear()
+        for r in self.db.tracks():
+            label = r["track"] + ((" - " + r["layout"]) if r["layout"] else "")
+            self.cmb_chart_track.addItem(label, userData=(r["track"], r["layout"]))
+        if cur:
+            idx = self.cmb_chart_track.findText(cur)
+            if idx >= 0:
+                self.cmb_chart_track.setCurrentIndex(idx)
+        self.cmb_chart_track.blockSignals(False)
+        self.on_chart_changed()
+
+    def on_chart_changed(self, *_):
+        data = self.cmb_chart_track.currentData()
+        if not data:
+            self.chart.set_series("", [])
+            return
+        track, layout = data
+        driver = "" if self.cmb_driver.currentText().startswith("(") else self.cmb_driver.currentText()
+        rows = self.db.progression(track, layout, driver=driver)
+        points = [(r["timestamp"], r["best_ms"]) for r in rows]
+        self.chart.set_series(
+            f"Bestzeiten-Entwicklung: {track}" + (f" – {layout}" if layout else ""),
+            points)
+
+    # ---------------------------------------------------------- Statistik --
+
+    def refresh_stats(self):
+        driver = "" if self.cmb_driver.currentText().startswith("(") else self.cmb_driver.currentText()
+        stats, _ = self.db.stats_summary(driver)
+        races = stats["races"] or 0
+        finishes = stats["finishes"] or 0
+        quote = (100.0 * finishes / races) if races else 0.0
+        self.tiles["Rennen"].setText(str(races))
+        self.tiles["Siege"].setText(str(stats["wins"]))
+        self.tiles["Podium"].setText(str(stats["podium"]))
+        self.tiles["Zielquote %"].setText(f"{quote:.0f} %")
+        self.tiles["Runden gesamt"].setText(str(stats["total_laps"] or 0))
+        self.tiles["Allzeit-Bestzeit"].setText(format_time_ms(stats["best_ms"]))
         self.lbl_stats.setText(
-            f"Sitzungen: {stats['sessions']} · Renneinsätze: {stats['entries']} "
-            f"· Runden gesamt: {total_laps} · Siege: {wins} · "
-            f"Allzeit-Bestzeit: {format_time_ms(stats['best_ms'])}")
+            f"Sitzungen: {stats['sessions']} · Fahrzeugeinsätze: {stats['entries']}")
+
+        rows = [[d["name"], d["starts"], d["dnfs"], f"{d['finish_rate']:.1f}"]
+                for d in self.db.dnf_summary(driver)]
+        self.dnf_model.beginResetModel()
+        self.dnf_model.rows = rows
+        self.dnf_model.endResetModel()
+
+    def on_driver_changed_full(self, name):
+        self.on_driver_changed(name)
+        self.refresh_stats()
+        self.on_chart_changed()
 
     def choose_folder(self):
         d = QtWidgets.QFileDialog.getExistingDirectory(
@@ -319,7 +611,6 @@ class MainWindow(QtWidgets.QMainWindow):
         self._show_update_dialog(info)
 
     def _auto_check_updates(self):
-        """Beim Start: im Hintergrund pruefen; nur melden, wenn es ein Update gibt."""
         self._upd_check = UpdateCheckWorker(self)
 
         def on_result(info, err):
