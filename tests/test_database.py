@@ -241,3 +241,44 @@ class TestDatabase(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main(verbosity=2)
+
+
+class TestIdUpgrade(unittest.TestCase):
+    """0.4.4: numeric track/vehicle IDs get renamed via upgrade_ids."""
+
+    def setUp(self):
+        import tempfile
+        self.tmp = tempfile.TemporaryDirectory()
+
+    def tearDown(self):
+        self.tmp.cleanup()
+
+    def _db_with_legacy_session(self):
+        from rrc.models import Session, PlayerResult
+        db = Database(os.path.join(self.tmp.name, "results.db"))
+        sess = Session(session_type="Race", timestamp="2023-06-03 14:13:21",
+                       track="999999", layout="(Layout-Id)",
+                       source_file="a.txt", digest="d-id-1")
+        sess.players.append(PlayerResult(name="Marcel Wijnandts", vehicle="777777"))
+        self.assertTrue(db.insert_session(sess, "a.txt"))
+        return db
+
+    def test_unresolved_lists(self):
+        db = self._db_with_legacy_session()
+        self.assertEqual(db.unresolved_track_ids(), ["999999"])
+        self.assertEqual(db.unresolved_car_ids(), ["777777"])
+        db.close()
+
+    def test_upgrade_ids_renames(self):
+        db = self._db_with_legacy_session()
+        user = {"layouts": {"999999": ["Neue Strecke", "Grand Prix"]},
+                "cars": {"777777": "Testwagen GT"}}
+        n_t, n_v = db.upgrade_ids(user)
+        self.assertEqual((n_t, n_v), (1, 1))
+        rows = db.sessions()
+        self.assertEqual(rows[0]["track"], "Neue Strecke")
+        self.assertEqual(rows[0]["layout"], "Grand Prix")
+        entries = db.entries_for(rows[0]["id"])
+        self.assertEqual(entries[0]["vehicle"], "Testwagen GT")
+        self.assertEqual(db.unresolved_track_ids(), [])
+        db.close()

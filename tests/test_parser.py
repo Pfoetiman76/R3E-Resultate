@@ -4,7 +4,7 @@ import unittest
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
 
-from rrc.parser import (datetime_from_filename, parse_file, session_type_from_filename)
+from rrc.parser import (datetime_from_filename, parse_file, parse_sp_json, session_type_from_filename)
 from rrc.models import format_time_ms
 
 SAMPLES = os.path.join(os.path.dirname(__file__), "..", "samples")
@@ -119,3 +119,30 @@ class TestBadInput(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main(verbosity=2)
+
+
+class TestLayoutIdResolution(unittest.TestCase):
+    """0.4.4: SP results with only a numeric layoutId get readable names."""
+
+    def test_layout_id_resolves_builtin(self):
+        data = {
+            "header": {"time": "2023-06-03 14:13:21"},
+            "event": {"layoutId": 12112},
+            "drivers": [{"name": "Marcel Wijnandts", "vehicle": "252",
+                         "place": 1, "bestlaptimems": 61000, "totallaps": 3}],
+        }
+        s = parse_sp_json(data, "2023_06_03_14_13_21_Race1.txt")
+        self.assertEqual(s.track, "Hockenheimring Classic")
+        self.assertEqual(s.layout, "Grand Prix")
+        self.assertEqual(s.players[0].vehicle, "Aquila CR1 Sports GT")
+
+    def test_layout_id_unknown_falls_back(self):
+        data = {
+            "event": {"layoutId": 999999999},
+            "drivers": [{"name": "Marcel Wijnandts", "vehicle": "Audi R8 LMS GT3",
+                         "place": 1, "bestlaptimems": 61000, "totallaps": 1}],
+        }
+        s = parse_sp_json(data, "2023_06_03_14_13_21_Race1.txt")
+        self.assertEqual(s.track, "999999999")
+        self.assertEqual(s.layout, "(Layout-Id)")
+        self.assertEqual(s.players[0].vehicle, "Audi R8 LMS GT3")
