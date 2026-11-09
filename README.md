@@ -3,7 +3,7 @@
 Eigenständige Begleit-App für **RaceRoom Racing Experience** – im Stil von „ACC Results Companion“:
 Sie liest die von RaceRoom erzeugten Ergebnisdateien automatisch ein und bietet eine dauerhafte Historie aller Sitzungen samt persönlichen Bestzeiten. Optik und Update-Mechanik folgen dem Vorbild von PitBoss R3E.
 
-## Funktionen (Version 0.4.5)
+## Funktionen (Version 0.4.4)
 
 - Überarbeitete Optik: kompakte Tabellen mit feinen Gitterlinien (keine Zebra-Streifen), Zeit- und Delta-Werte in technischer Schrift (Consolas), aktiver Reiter und Auswahl in RaceRoom-Rot, Rekordwerte gelb hervorgehoben, dauerhafte Statusanzeige (Sitzungen · Runden · Datenbank)
 - Automatische Überwachung des RaceRoom-Ergebnisordners (alle 5 Sekunden); neue Sitzungen erscheinen ohne Zutun
@@ -21,8 +21,6 @@ Sie liest die von RaceRoom erzeugten Ergebnisdateien automatisch ein und bietet 
 - Farbige Delta-Anzeige je Runde: grün = Rekordklasse, amber = nah dran (innerhalb 2 % der Rekordzeit), rot = Ausrutscher (über 2 s langsamer)
 - KI-Fahrer ausblenden: Haken in der Sitzungsliste; die Namen echter Fahrer legen Sie unter „Werkzeuge → Echte Fahrer festlegen …“ fest (durch Komma getrennt). Der Filter wirkt auf Sitzungsliste, Ergebnisdetails, Runden-Fahrerwahl, Bestzeiten und Exporte
 - Kraftstoffrechner („Werkzeuge → Kraftstoffrechner …“): Bedarfsprognose für Rennen nach Runden oder Minuten
-- Erweiterte Filter in der Sitzungsliste: Zeitraum (Datum von/bis mit Kalenderauswahl, aktivierbar über Haken), Strecke und Fahrzeug; kombinierbar mit Suche, Typ und Fahrer
-- Eigenes App-Symbol (Stoppuhr mit Schriftzug, freigegebene Kombination): Fenster- und Taskleistensymbol; der Installer nutzt es ebenfalls für Programm und Desktop-Verknüpfung
 - Strecken-Id-Auflösung: Einzelspieler-Ergebnisse von RaceRoom nennen die Strecke nur als interne Nummer. Die App übersetzt bekannte Ids automatisch in lesbare Namen (z. B. „Hockenheimring Classic – Grand Prix“); unbekannte Ids ordnen Sie einmalig über „Werkzeuge → Unbekannte Strecken-Ids zuordnen …“ zu – die Zuordnung wird gespeichert und auf alle vorhandenen und künftigen Sitzungen angewendet
   - Ø Rundenzeit kommt automatisch aus der eigenen Sitzungshistorie (Rundendaten, Fallback: Bestzeiten)
   - Verbrauch pro Runde und Tankgröße pflegen Sie je Strecke/Fahrzeug einmal; die Werte werden in `fuel_history.json` im App-Ordner gespeichert
@@ -75,14 +73,12 @@ Klick-Weg: GitHub → **Releases** → **Draft a new release** → Tag `v0.2.0` 
 | `rrc/database.py` | SQLite-Speicher mit Duplikaterkennung (Digest) |
 | `rrc/models.py` | Datenmodelle + Zeitformatierung + `APP_VERSION` |
 | `rrc/trackids.py` | Übersetzungstabelle für RaceRoom-Strecken- und Fahrzeug-Ids + Benutzerzuordnungen |
-| `rrc/icon_gen.py` | Prozeduraler Icon-Generator (reines Python, erzeugt die .ico in allen Größen) |
-| `tools/make_icon.py` | Build-Hilfsskript: erzeugt `rrc/app_icon.ico` vor dem PyInstaller-Build |
 | `rrc/paths.py` | Standardpfade (Ergebnisordner, Datenbank) |
 | `updater.py` | GitHub-Releases-Updateprüfung + Installer-Download (bewährtes PitBoss-Modul) |
 | `installer/setup.iss` | Inno-Setup-Installer |
 | `installer/r3e_resultate.spec` | PyInstaller-Spezifikation |
 | `.github/workflows/release.yml` | CI: Tests → EXE → Installer → Release |
-| `tests/` | 75 Unit-Tests (Parser, Datenbank, Modelle, Einstellungen, Kraftstoff, Id-Auflösung, Icon) |
+| `tests/` | 65 Unit-Tests (Parser, Datenbank, Modelle, Einstellungen, Kraftstoff, Id-Auflösung) |
 
 Tests ausführen: `python -m unittest discover -s tests`
 

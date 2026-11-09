@@ -284,52 +284,72 @@ class TestIdUpgrade(unittest.TestCase):
         db.close()
 
 
-class TestSessionFilters(unittest.TestCase):
-    """0.4.5: erweiterte Filter Datum von/bis, Strecke, Fahrzeug."""
+class TestStatsCorrection(unittest.TestCase):
+    """0.4.6: Zielquote pro Renneinsatz, KI-Filter in der Statistik."""
 
     def setUp(self):
         import tempfile
         from rrc.models import Session, PlayerResult
         self.tmp = tempfile.TemporaryDirectory()
         self.db = Database(os.path.join(self.tmp.name, "results.db"))
-        for i, (ts, track, veh) in enumerate([
-                ("2023-06-01 10:00:00", "Sachsenring", "Audi R8 LMS GT3"),
-                ("2023-06-15 10:00:00", "Sachsenring", "BMW M4 GT3"),
-                ("2023-07-01 10:00:00", "Nordschleife", "Audi R8 LMS GT3")]):
-            s = Session(session_type="Race", timestamp=ts, track=track,
-                        layout="", source_file=f"f{i}.txt", digest=f"d-f{i}")
-            s.players.append(PlayerResult(name="Marcel Wijnandts", vehicle=veh,
-                                           best_lap_ms=80000 + i))
-            self.db.insert_session(s, f"f{i}.txt")
+        for i in range(4):
+            s = Session(session_type="Race", timestamp=f"2023-06-0{i+1} 10:00:00",
+                        track="Sachsenring", layout="",
+                        source_file=f"g{i}.txt", digest=f"d-g{i}")
+            # je Rennen: Marcel (Sieger), zwei KI-Fahrer (einer DNF)
+            s.players.append(PlayerResult(name="Marcel Wijnandts",
+                                          vehicle="Audi R8 LMS GT3",
+                                          position=1, laps=10,
+                                          best_lap_ms=80000))
+            s.players.append(PlayerResult(name="KI A", vehicle="GT3",
+                                          position=2, laps=9,
+                                          best_lap_ms=82000))
+            s.players.append(PlayerResult(name="KI B", vehicle="GT3",
+                                          position=0, laps=5,
+                                          best_lap_ms=0,
+                                          finish_status="DNF"))
+            self.db.insert_session(s, f"g{i}.txt")
 
     def tearDown(self):
         self.db.close()
         self.tmp.cleanup()
 
-    def test_date_range(self):
-        rows = self.db.sessions(date_from="2023-06-05", date_to="2023-06-30")
-        self.assertEqual(len(rows), 1)
-        self.assertEqual(rows[0]["track"], "Sachsenring")
+    def test_quote_per_race_entry_not_per_session(self):
+        stats, _ = self.db.stats_summary()
+        # 12 Renneinsaetze (4 Rennen x 3 Fahrer), davon 8 im Ziel
+        # (pro Rennen fehlt der DNF-Fahrer)
+        self.assertEqual(stats["race_entries"], 12)
+        self.assertEqual(stats["finishes"], 8)
+        quote = 100.0 * stats["finishes"] / stats["race_entries"]
+        self.assertAlmostEqual(quote, 200.0 / 3.0)
 
-    def test_date_from_only(self):
-        rows = self.db.sessions(date_from="2023-06-16")
-        self.assertEqual(len(rows), 1)
-        self.assertEqual(rows[0]["track"], "Nordschleife")
+    def test_wins_podium_without_driver_count_all(self):
+        stats, _ = self.db.stats_summary()
+        self.assertEqual(stats["wins"], 4)
+        self.assertEqual(stats["podium"], 8)
 
-    def test_track_filter(self):
-        rows = self.db.sessions(track="Sachsenring")
-        self.assertEqual(len(rows), 2)
+    def test_names_filter_limits_stats(self):
+        stats, _ = self.db.stats_summary(names=["Marcel Wijnandts"])
+        self.assertEqual(stats["wins"], 4)
+        self.assertEqual(stats["race_entries"], 4)
+        self.assertEqual(stats["finishes"], 4)
+        self.assertEqual(stats["total_laps"], 40)
+        self.assertEqual(stats["entries"], 4)
 
-    def test_vehicle_filter(self):
-        rows = self.db.sessions(vehicle="BMW M4 GT3")
-        self.assertEqual(len(rows), 1)
-        self.assertEqual(rows[0]["timestamp"], "2023-06-15 10:00:00")
+    def test_names_filter_empty_list_zero(self):
+        stats, _ = self.db.stats_summary(names=[])
+        self.assertEqual(stats["races"], 0)
+        self.assertEqual(stats["total_laps"], 0)
 
-    def test_combined_filters(self):
-        rows = self.db.sessions(track="Sachsenring", vehicle="Audi R8 LMS GT3")
-        self.assertEqual(len(rows), 1)
-        self.assertEqual(rows[0]["timestamp"], "2023-06-01 10:00:00")
+    def test_dnf_summary_names_filter(self):
+        all_rows = self.db.dnf_summary()
+        self.assertEqual(len(all_rows), 3)
+        only = self.db.dnf_summary(names=["Marcel Wijnandts"])
+        self.assertEqual(len(only), 1)
+        self.assertEqual(only[0]["dnfs"], 0)
+        self.assertEqual(only[0]["starts"], 4)
 
-    def test_vehicles_listing(self):
-        self.assertEqual(self.db.vehicles(),
-                         ["Audi R8 LMS GT3", "BMW M4 GT3"])
+    def test_driver_and_names_combined(self):
+        stats, _ = self.db.stats_summary(driver="KI B")
+        self.assertEqual(stats["race_entries"], 4)
+        self.assertEqual(stats["finishes"], 0)

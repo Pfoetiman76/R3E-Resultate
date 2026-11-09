@@ -165,10 +165,8 @@ class Database:
         return n_tracks, n_vehicles
 
     def sessions(self, limit=5000, search="", session_type="", driver="",
-                 names=None, date_from="", date_to="", track="",
-                 vehicle=""):
-        """Session list, optional filters: free text (track/driver), type,
-        driver, date range (YYYY-MM-DD), track, vehicle.
+                 names=None):
+        """Session list, optional filters: free text (track/driver), type, driver.
 
         Order: newest first. n_players counts all entries; driver_best_ms is the
         best lap of the (optionally filtered) driver in that session.
@@ -194,20 +192,6 @@ class Database:
         if session_type:
             where.append("s.session_type LIKE ?")
             params.append(f"{session_type}%")
-        if date_from:
-            # timestamp ist 'YYYY-MM-DD HH:MM:SS' -> Stringvergleich genügt
-            where.append("s.timestamp >= ?")
-            params.append(f"{date_from} 00:00:00")
-        if date_to:
-            where.append("s.timestamp <= ?")
-            params.append(f"{date_to} 23:59:59")
-        if track:
-            where.append("s.track = ?")
-            params.append(track)
-        if vehicle:
-            where.append("s.id IN (SELECT session_id FROM entries "
-                         "WHERE vehicle = ?)")
-            params.append(vehicle)
         if where:
             q += "WHERE " + " AND ".join(where) + " "
         q += ("GROUP BY s.id")
@@ -292,13 +276,6 @@ class Database:
             "WHERE s.track = ? AND e.vehicle != '' ORDER BY e.vehicle",
             (track,))]
 
-    def vehicles(self):
-        """Distinct vehicle names in entries (for the filter combo)."""
-        rows = self.conn.execute(
-            "SELECT DISTINCT vehicle FROM entries "
-            "WHERE vehicle != '' ORDER BY vehicle").fetchall()
-        return [r["vehicle"] for r in rows]
-
     def progression(self, track, layout="", vehicle="", driver=""):
         """Best lap per session over time (for the chart)."""
         q = ("SELECT s.timestamp, MIN(e.best_lap_ms) AS best_ms "
@@ -317,11 +294,34 @@ class Database:
         q += "GROUP BY s.id ORDER BY s.timestamp ASC"
         return self.conn.execute(q, params).fetchall()
 
-    def stats_summary(self, driver: str = ""):
+    def _stats_conditions(self, driver: str, names):
+        """Gemeinsame WHERE-Bausteine für die Statistik zurück."""
         base = "FROM entries e JOIN sessions s ON s.id = e.session_id "
-        cond = "AND e.name = ? " if driver else ""
+        conds, params = [], []
+        if driver:
+            conds.append("e.name = ?")
+            params.append(driver)
+        if names is not None:
+            conds.append("e.name IN (" + ",".join("?" * len(names)) + ")")
+            params.extend(names)
+        cond = ("AND " + " AND ".join(conds) + " ") if conds else ""
+        return base, cond, params
+
+    def stats_summary(self, driver: str = "", names=None):
+        """Kennzahlen für die Statistik-Kacheln.
+
+        names: None = alle Fahrer; Liste = nur diese (KI-Ausblendung);
+        leere Liste = alles 0. finishes/race_entries beziehen sich auf
+        Renn-Einträge, damit die Zielquote die Ziele pro Renneinsatz
+        angibt (nicht pro Sitzung).
+        """
+        zero = {"sessions": 0, "entries": 0, "best_ms": None,
+                "total_laps": 0, "races": 0, "race_entries": 0, "wins": 0,
+                "podium": 0, "finishes": 0}
+        if names is not None and not names:
+            return zero, 0
+        base, cond, params = self._stats_conditions(driver, names)
         race = "AND s.session_type LIKE 'Race%' "
-        params = (driver,) if driver else ()
         row = self.conn.execute(
             f"SELECT COUNT(DISTINCT s.id) AS sessions, COUNT(e.id) AS entries, "
             f"MIN(e.best_lap_ms) AS best_ms, SUM(e.laps) AS total_laps {base} "
@@ -332,6 +332,9 @@ class Database:
         races = self.conn.execute(
             f"SELECT COUNT(DISTINCT s.id) AS races {base} "
             f"WHERE 1=1 {cond} {race}", params).fetchone()["races"]
+        race_entries = self.conn.execute(
+            f"SELECT COUNT(*) AS race_entries {base} "
+            f"WHERE 1=1 {cond} {race}", params).fetchone()["race_entries"]
         podium = self.conn.execute(
             f"SELECT COUNT(*) AS podium {base} "
             f"WHERE e.position BETWEEN 1 AND 3 {cond} {race}", params).fetchone()["podium"]
@@ -341,11 +344,14 @@ class Database:
             f"AND (e.finish_status = '' OR LOWER(e.finish_status) = 'finished')",
             params).fetchone()["finishes"]
         d = dict(row)
-        d.update(races=races, wins=wins, podium=podium, finishes=finishes)
+        d.update(races=races, race_entries=race_entries, wins=wins,
+                 podium=podium, finishes=finishes)
         return d, wins
 
-    def dnf_summary(self, driver: str = ""):
+    def dnf_summary(self, driver: str = "", names=None):
         """Per driver: race starts, DNFs, finish rate. Only race sessions."""
+        if names is not None and not names:
+            return []
         q = ("SELECT e.name, COUNT(*) AS starts, "
              "SUM(CASE WHEN (e.finish_status != '' AND LOWER(e.finish_status) "
              "             != 'finished') OR e.position = 0 THEN 1 ELSE 0 END) AS dnfs "
@@ -355,6 +361,9 @@ class Database:
         if driver:
             q += "AND e.name = ? "
             params.append(driver)
+        if names is not None:
+            q += "AND e.name IN (" + ",".join("?" * len(names)) + ") "
+            params.extend(names)
         q += ("GROUP BY e.name ORDER BY dnfs DESC, starts DESC")
         rows = self.conn.execute(q, params).fetchall()
         out = []
