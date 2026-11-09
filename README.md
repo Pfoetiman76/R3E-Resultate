@@ -72,12 +72,13 @@ Klick-Weg: GitHub → **Releases** → **Draft a new release** → Tag `v0.2.0` 
 | `rrc/parser.py` | Formatunabhängiger Parser (SP-JSON, Dedicated-JSON, Multiplayer-XML) |
 | `rrc/database.py` | SQLite-Speicher mit Duplikaterkennung (Digest) |
 | `rrc/models.py` | Datenmodelle + Zeitformatierung + `APP_VERSION` |
+| `rrc/trackids.py` | Übersetzungstabelle für RaceRoom-Strecken- und Fahrzeug-Ids + Benutzerzuordnungen |
 | `rrc/paths.py` | Standardpfade (Ergebnisordner, Datenbank) |
 | `updater.py` | GitHub-Releases-Updateprüfung + Installer-Download (bewährtes PitBoss-Modul) |
 | `installer/setup.iss` | Inno-Setup-Installer |
 | `installer/r3e_resultate.spec` | PyInstaller-Spezifikation |
 | `.github/workflows/release.yml` | CI: Tests → EXE → Installer → Release |
-| `tests/` | 52 Unit-Tests (Parser, Datenbank, Modelle, Einstellungen, Kraftstoff) |
+| `tests/` | 65 Unit-Tests (Parser, Datenbank, Modelle, Einstellungen, Kraftstoff, Id-Auflösung) |
 
 Tests ausführen: `python -m unittest discover -s tests`
 
