@@ -1,0 +1,37 @@
+<?xml version="1.0" encoding="utf-8"?>
+<MultiplayerRaceResult>
+  <Time>2024-03-02T19:01:45Z</Time>
+  <Track>Hockenheim</Track>
+  <TrackLayout>GP</TrackLayout>
+  <Sessions>
+    <Session>
+      <Type>Race</Type>
+      <Players>
+        <Player>
+          <Name>Marcel Wijnandts</Name>
+          <Car>Mercedes-AMG GT3 2020</Car>
+          <Position>1</Position>
+          <FinishStatus>Finished</FinishStatus>
+          <TotalTime>1200000</TotalTime>
+          <BestLapTime>59870</BestLapTime>
+          <RaceSessionLaps>
+            <Lap><Time>61000</Time><SectorTimes><SectorTime>20000</SectorTime><SectorTime>20000</SectorTime><SectorTime>21000</SectorTime></SectorTimes></Lap>
+            <Lap><Time>59870</Time><SectorTimes><SectorTime>19500</SectorTime><SectorTime>19800</SectorTime><SectorTime>20570</SectorTime></SectorTimes></Lap>
+          </RaceSessionLaps>
+        </Player>
+        <Player>
+          <Name>Gegner</Name>
+          <Car>Mercedes-AMG GT3 2020</Car>
+          <Position>2</Position>
+          <FinishStatus>Finished</FinishStatus>
+          <TotalTime>1210000</TotalTime>
+          <BestLapTime>60400</BestLapTime>
+          <RaceSessionLaps>
+            <Lap><Time>62000</Time></Lap>
+            <Lap><Time>60400</Time></Lap>
+          </RaceSessionLaps>
+        </Player>
+      </Players>
+    </Session>
+  </Sessions>
+</MultiplayerRaceResult>

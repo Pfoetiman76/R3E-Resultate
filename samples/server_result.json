@@ -1,0 +1,18 @@
+{
+  "Server": "MyLeague",
+  "Time": "1685800421000",
+  "Track": "Sachsenring",
+  "TrackLayout": "ADAC GT Masters",
+  "Sessions": [
+    {"Type": "Qualify", "Players": [
+      {"Name": "Marcel Wijnandts", "Car": "Audi R8 LMS GT3", "BestLapTime": 79123, "Position": 1, "RaceSessionLaps": []},
+      {"Name": "Fahrer B", "Car": "Audi R8 LMS GT3", "BestLapTime": 80456, "Position": 2, "RaceSessionLaps": []}
+    ]},
+    {"Type": "Race", "Players": [
+      {"Name": "Fahrer B", "Car": "Audi R8 LMS GT3", "FinishStatus": "Finished", "TotalTime": 1600000, "BestLapTime": 81234, "Position": 1,
+       "RaceSessionLaps": [{"LapTime": 84500, "SectorTimes": [28000, 27000, 29500]}, {"LapTime": 81234, "SectorTimes": [27000, 26000, 28234]}]},
+      {"Name": "Marcel Wijnandts", "Car": "Audi R8 LMS GT3", "FinishStatus": "Finished", "TotalTime": 1615000, "BestLapTime": 82001, "Position": 2,
+       "RaceSessionLaps": [{"LapTime": 83200, "SectorTimes": [27000, 27000, 29200]}, {"LapTime": 82001, "SectorTimes": [26500, 27000, 28501]}]}
+    ]}
+  ]
+}

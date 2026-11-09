@@ -1,0 +1,12 @@
+{
+  "header": {"time": "2023/06/03 14:13:45", "version": 2},
+  "event": {"track": "Nordschleife", "layout": "VLN-Gesamtstrecke", "layoutId": 123456789},
+  "drivers": [
+    {"name": "Marcel Wijnandts", "vehicle": "BMW M4 GT3", "carId": 111, "team": null,
+     "countryId": 276, "liveryId": 5, "place": 1, "qualtimems": 0,
+     "racetimems": 1800000, "bestlaptimems": 512340, "totallaps": 4},
+    {"name": "AI Driver", "vehicle": "BMW M4 GT3", "carId": 111, "team": null,
+     "countryId": 40, "liveryId": 7, "place": 2, "qualtimems": 0,
+     "racetimems": 1850000, "bestlaptimems": 522100, "totallaps": 4}
+  ]
+}
