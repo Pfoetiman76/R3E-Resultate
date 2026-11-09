@@ -195,6 +195,44 @@ class TestDatabase(unittest.TestCase):
         self.assertIsNone(rec["best_ms"])
         self.assertIsNone(rec["optimal_ms"])
 
+    # --------------------------------------------------------- 0.4.2 NEU --
+
+    def test_ai_hide_entries_for(self):
+        """KI-Ausblendung: nur echte Fahrer in der Detailtabelle."""
+        self.db.ingest_folder(SAMPLES)
+        s = next(r for r in self.db.sessions() if r["track"] == "Nordschleife")
+        entries = self.db.entries_for(s["id"], names=["Marcel Wijnandts"])
+        self.assertEqual([e["name"] for e in entries], ["Marcel Wijnandts"])
+        self.assertEqual(self.db.entries_for(s["id"], names=[]), [])
+
+    def test_ai_hide_sessions_counts(self):
+        """n_players und Sitzungs-Bestzeit zaehlen nur echte Fahrer."""
+        self.db.ingest_folder(SAMPLES)
+        rows = self.db.sessions(names=["Marcel Wijnandts"])
+        nord = next(r for r in rows if r["track"] == "Nordschleife")
+        self.assertEqual(nord["n_players"], 1)      # AI Driver ausgeblendet
+        self.assertEqual(nord["session_best_ms"], 512340)
+        empty = self.db.sessions(names=[])
+        self.assertEqual(empty, [])
+        self.assertEqual(len(self.db.sessions(names=["Fahrer B"])), 2)
+
+    def test_ai_hide_personal_bests_and_drivers(self):
+        self.db.ingest_folder(SAMPLES)
+        bests = self.db.personal_bests(names=["Marcel Wijnandts"])
+        self.assertTrue(all(b["name"] == "Marcel Wijnandts" for b in bests))
+        self.assertEqual(self.db.personal_bests(names=[]), [])
+        self.assertEqual(self.db.drivers(names=["Marcel Wijnandts"]),
+                         ["Marcel Wijnandts"])
+        self.assertEqual(self.db.drivers(names=[]), [])
+
+    def test_ai_hide_none_shows_all(self):
+        """names=None = alter Zustand: alle Fahrer."""
+        self.db.ingest_folder(SAMPLES)
+        self.assertIn("Fahrer B", self.db.drivers(names=None))
+        nord = next(r for r in self.db.sessions(names=None)
+                    if r["track"] == "Nordschleife")
+        self.assertEqual(nord["n_players"], 2)
+
 
 if __name__ == "__main__":
     unittest.main(verbosity=2)

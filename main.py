@@ -6,6 +6,7 @@ A standalone companion app for RaceRoom Racing Experience:
 - lap-by-lap view with sector times (server results)
 - personal best times per track/layout/car + progression chart
 - statistics dashboard with finish/DNF analysis
+- optional hiding of AI drivers (real-driver list, persisted)
 - dark PitBoss-style theme, update check over GitHub Releases
 
 Run: python main.py
@@ -20,6 +21,7 @@ from PySide6 import QtCore, QtGui, QtWidgets
 
 import updater
 from rrc import fuelcalc
+from rrc import appsettings
 from rrc.charts import LineChartWidget
 from rrc.database import Database
 from rrc.models import APP_NAME, APP_VERSION, delta_class, format_time_ms
@@ -329,6 +331,8 @@ class MainWindow(QtWidgets.QMainWindow):
         self._current_entries = []   # entries of the selected session (for export)
         self._lap_session_rows = {}  # session rows of the laps tab (0.4.1)
         self._lap_records = {}       # track records of the selected laps session
+        self.settings_path = appsettings.settings_path(default_app_dir())
+        self.settings = appsettings.load_settings(self.settings_path)
 
         self.tabs = QtWidgets.QTabWidget()
         self.setCentralWidget(self.tabs)
@@ -344,6 +348,9 @@ class MainWindow(QtWidgets.QMainWindow):
         self.watch_timer.start()
 
         self.lbl_dir.setText(self.results_dir)
+        self.chk_hide_ai.blockSignals(True)
+        self.chk_hide_ai.setChecked(bool(self.settings.get("hide_ai")))
+        self.chk_hide_ai.blockSignals(False)
         self.rescan(silent=True)
         self._auto_check_updates()
 
@@ -380,6 +387,12 @@ class MainWindow(QtWidgets.QMainWindow):
         self.cmb_driver_sessions.setMinimumWidth(180)
         self.cmb_driver_sessions.currentTextChanged.connect(self.refresh_sessions)
         filt.addWidget(self.cmb_driver_sessions)
+        self.chk_hide_ai = QtWidgets.QCheckBox("KI-Fahrer ausblenden")
+        self.chk_hide_ai.setToolTip(
+            "Zeigt nur die unter 'Werkzeuge → Echte Fahrer festlegen …' "
+            "eingetragenen Fahrer")
+        self.chk_hide_ai.toggled.connect(self.on_hide_ai_toggled)
+        filt.addWidget(self.chk_hide_ai)
         v.addLayout(filt)
 
         self.tbl_sessions = QtWidgets.QTableView()
@@ -558,6 +571,9 @@ class MainWindow(QtWidgets.QMainWindow):
         act_fuel = QtGui.QAction("Kraftstoffrechner …", self)
         act_fuel.triggered.connect(self.open_fuel_calculator)
         mw.addAction(act_fuel)
+        act_drivers = QtGui.QAction("Echte Fahrer festlegen …", self)
+        act_drivers.triggered.connect(self.edit_real_drivers)
+        mw.addAction(act_drivers)
 
         mh = self.menuBar().addMenu("&Hilfe")
         act_update = QtGui.QAction("Nach Updates suchen …", self)
@@ -605,7 +621,7 @@ class MainWindow(QtWidgets.QMainWindow):
         self._reload_tracks()
 
     def _driver_names(self):
-        return self.db.drivers()
+        return self.db.drivers(names=self._name_filter())
 
     def _reload_driver_boxes(self):
         names = self._driver_names()
@@ -625,7 +641,8 @@ class MainWindow(QtWidgets.QMainWindow):
         type_ = "" if type_sel in ("", "Alle") else type_sel
         driver = self.cmb_driver_sessions.currentText()
         driver = "" if driver.startswith("(") else driver
-        rows = self.db.sessions(search=search, session_type=type_, driver=driver)
+        rows = self.db.sessions(search=search, session_type=type_, driver=driver,
+                                names=self._name_filter())
         self.sess_model.set_rows(rows)
 
     def _session_label(self, r):
@@ -638,7 +655,9 @@ class MainWindow(QtWidgets.QMainWindow):
             self._current_entries = []
             return
         row = self.sess_model._raw[indexes[0].row()]
-        self._current_entries = [dict(e) for e in self.db.entries_for(row["id"])]
+        self._current_entries = [dict(e) for e in
+                                  self.db.entries_for(row["id"],
+                                                       names=self._name_filter())]
         rows = [[e["position"], e["name"], e["vehicle"], e["laps"],
                  format_time_ms(e["best_lap_ms"]),
                  format_time_ms(e["race_time_ms"]),
@@ -681,7 +700,7 @@ class MainWindow(QtWidgets.QMainWindow):
         self.cmb_lap_driver.blockSignals(True)
         self.cmb_lap_driver.clear()
         if sid is not None:
-            for e in self.db.entries_for(sid):
+            for e in self.db.entries_for(sid, names=self._name_filter()):
                 self.cmb_lap_driver.addItem(e["name"], userData=e["id"])
         self.cmb_lap_driver.blockSignals(False)
         self.on_lap_driver_changed()
@@ -727,7 +746,7 @@ class MainWindow(QtWidgets.QMainWindow):
         if not indexes:
             return None, None
         row = self.sess_model._raw[indexes[0].row()]
-        return row, self.db.entries_for(row["id"])
+        return row, self.db.entries_for(row["id"], names=self._name_filter())
 
     def _export_path(self, suffix):
         row, entries = self._selected_session()
@@ -800,7 +819,7 @@ class MainWindow(QtWidgets.QMainWindow):
     def on_driver_changed(self, name):
         driver = "" if name.startswith("(") else name
         rows = []
-        for r in self.db.personal_bests(driver):
+        for r in self.db.personal_bests(driver, names=self._name_filter()):
             rows.append([r["name"], (r["track"] + ((" - " + r["layout"]) if r["layout"] else "")),
                          r["vehicle"], format_time_ms(r["best_ms"]), r["n"], r["last_seen"]])
         self.bests_model.beginResetModel()
@@ -861,6 +880,59 @@ class MainWindow(QtWidgets.QMainWindow):
         self.on_driver_changed(name)
         self.refresh_stats()
         self.on_chart_changed()
+
+    # ----------------------------------------------- KI-Fahrer ausblenden --
+
+    def _name_filter(self):
+        """None = alle Fahrer; sonst Liste echter Fahrer (leer = nichts)."""
+        if not self.settings.get("hide_ai"):
+            return None
+        return self.settings.get("real_drivers") or []
+
+    def _save_settings(self):
+        try:
+            self.settings = appsettings.save_settings(self.settings_path,
+                                                      self.settings)
+        except OSError:
+            self.statusBar().showMessage(
+                "Einstellungen konnten nicht gespeichert werden.", 8000)
+
+    def on_hide_ai_toggled(self, checked):
+        self.settings["hide_ai"] = bool(checked)
+        self._save_settings()
+        if checked and not self.settings.get("real_drivers"):
+            QtWidgets.QMessageBox.information(
+                self, "KI-Fahrer ausblenden",
+                "Es sind noch keine echten Fahrer hinterlegt.\n"
+                "Bitte tragen Sie unter 'Werkzeuge → Echte Fahrer festlegen …' "
+                "ein, welche Fahrer angezeigt bleiben sollen.")
+        # Alle von der Liste abhaengigen Ansichten neu aufbauen
+        self._reload_driver_boxes()
+        self.refresh_sessions()
+        self._reload_lap_sessions()
+        self.on_driver_changed(self.cmb_driver.currentText())
+        self.statusBar().showMessage(
+            "KI-Fahrer ausgeblendet" if checked else "Alle Fahrer angezeigt", 5000)
+
+    def edit_real_drivers(self):
+        txt, ok = QtWidgets.QInputDialog.getMultiLineText(
+            self, "Echte Fahrer festlegen",
+            "Namen der echten (menschlichen) Fahrer, durch Komma getrennt.\n"
+            "Bei aktivem Haken 'KI-Fahrer ausblenden' werden nur diese "
+            "Fahrer angezeigt:",
+            ", ".join(self.settings.get("real_drivers") or []))
+        if not ok:
+            return
+        names = [n.strip() for n in txt.split(",") if n.strip()]
+        self.settings["real_drivers"] = names
+        self._save_settings()
+        if self.settings.get("hide_ai"):
+            self._reload_driver_boxes()
+            self.refresh_sessions()
+            self._reload_lap_sessions()
+            self.on_driver_changed(self.cmb_driver.currentText())
+        self.statusBar().showMessage(
+            f"{len(names)} echte Fahrer gespeichert.", 5000)
 
     def choose_folder(self):
         d = QtWidgets.QFileDialog.getExistingDirectory(

@@ -125,15 +125,24 @@ class Database:
 
     # ------------------------------------------------------------ queries --
 
-    def sessions(self, limit=5000, search="", session_type="", driver=""):
+    def sessions(self, limit=5000, search="", session_type="", driver="",
+                 names=None):
         """Session list, optional filters: free text (track/driver), type, driver.
 
         Order: newest first. n_players counts all entries; driver_best_ms is the
         best lap of the (optionally filtered) driver in that session.
+        names: None = alle Fahrer; Liste = nur diese Fahrer anzeigen
+        (Option "KI-Fahrer ausblenden"); leere Liste = keine Treffer.
         """
+        if names is not None and not names:
+            return []
         q = ("SELECT s.*, COUNT(e.id) AS n_players, "
              "MIN(e.best_lap_ms) AS session_best_ms "
              "FROM sessions s LEFT JOIN entries e ON e.session_id = s.id ")
+        jparams = []
+        if names is not None:
+            q += "AND e.name IN (" + ",".join("?" * len(names)) + ") "
+            jparams = list(names)
         where, params = [], []
         if driver:
             where.append("s.id IN (SELECT session_id FROM entries WHERE name = ?)")
@@ -146,14 +155,24 @@ class Database:
             params.append(f"{session_type}%")
         if where:
             q += "WHERE " + " AND ".join(where) + " "
-        q += ("GROUP BY s.id ORDER BY s.timestamp DESC LIMIT ?")
-        params.append(limit)
-        return self.conn.execute(q, params).fetchall()
+        q += ("GROUP BY s.id")
+        if names is not None:
+            q += " HAVING COUNT(e.id) > 0"   # Sitzungen ohne echte Fahrer weg
+        q += (" ORDER BY s.timestamp DESC LIMIT ?")
+        return self.conn.execute(q, jparams + params + [limit]).fetchall()
 
-    def entries_for(self, session_id):
-        return self.conn.execute(
-            "SELECT * FROM entries WHERE session_id = ? "
-            "ORDER BY position ASC, best_lap_ms ASC", (session_id,)).fetchall()
+    def entries_for(self, session_id, names=None):
+        """Entries of a session; names wie bei sessions() (KI-Ausblendung)."""
+        q = "SELECT * FROM entries WHERE session_id = ? "
+        params = [session_id]
+        if names is not None:
+            if names:
+                q += "AND name IN (" + ",".join("?" * len(names)) + ") "
+                params += list(names)
+            else:
+                q += "AND 1=0 "
+        q += "ORDER BY position ASC, best_lap_ms ASC"
+        return self.conn.execute(q, params).fetchall()
 
     def laps_for_session(self, session_id):
         """All laps of a session joined with driver names. Ordered by driver, lap."""
@@ -169,14 +188,21 @@ class Database:
             "JOIN laps l ON l.entry_id = e.id "
             "GROUP BY s.id ORDER BY s.timestamp DESC LIMIT ?", (limit,)).fetchall()
 
-    def personal_bests(self, driver: str = ""):
-        """Best lap per track/layout/vehicle. driver empty = all drivers."""
+    def personal_bests(self, driver: str = "", names=None):
+        """Best lap per track/layout/vehicle. driver empty = all drivers.
+        names wie bei sessions() (KI-Ausblendung)."""
         q = ("SELECT e.name, s.track, s.layout, e.vehicle, "
              "MIN(e.best_lap_ms) AS best_ms, COUNT(*) AS n, "
              "MAX(s.timestamp) AS last_seen "
              "FROM entries e JOIN sessions s ON s.id = e.session_id "
              "WHERE e.best_lap_ms > 0 ")
         params = []
+        if names is not None:
+            if names:
+                q += "AND e.name IN (" + ",".join("?" * len(names)) + ") "
+                params += list(names)
+            else:
+                q += "AND 1=0 "
         if driver:
             q += "AND e.name = ? "
             params.append(driver)
@@ -184,9 +210,18 @@ class Database:
               "ORDER BY s.track, s.layout, e.vehicle, best_ms ASC")
         return self.conn.execute(q, params).fetchall()
 
-    def drivers(self):
-        return [r["name"] for r in self.conn.execute(
-            "SELECT DISTINCT name FROM entries WHERE name != '' ORDER BY name")]
+    def drivers(self, names=None):
+        """Distinct driver names; names-Filter fuer die KI-Ausblendung."""
+        q = "SELECT DISTINCT name FROM entries WHERE name != '' "
+        params = []
+        if names is not None:
+            if names:
+                q += "AND name IN (" + ",".join("?" * len(names)) + ") "
+                params += list(names)
+            else:
+                q += "AND 1=0 "
+        q += "ORDER BY name"
+        return [r["name"] for r in self.conn.execute(q, params)]
 
     def tracks(self):
         """Distinct track/layout combinations, display-ready."""
