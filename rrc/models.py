@@ -1,6 +1,6 @@
 """RaceRoom Results Companion (RRC) - parsed result models."""
 APP_NAME = "RaceRoom Results Companion"
-APP_VERSION = "0.4.0"
+APP_VERSION = "0.4.1"
 
 from dataclasses import dataclass, field
 
@@ -58,3 +58,29 @@ def format_time_ms(ms) -> str:
     m, rem = divmod(ms, 60000)
     s, msec = divmod(rem, 1000)
     return f"{m}:{s:02d}.{msec:03d}"
+
+
+def delta_class(delta_ms, record_ms=0) -> str:
+    """Farbklasse fuer Delta-Anzeigen gegen einen Rekord.
+
+    'good'  - Rundenzzeit ist Rekord oder schneller
+    'near'  - innerhalb von 2 % der Rekordzeit (nah dran)
+    'bad'   - ueber 2 Sekunden langsamer (Ausrutscher/Rundraus)
+    ''      - neutral / keine Bewertung moeglich
+    """
+    if delta_ms is None or record_ms is None:
+        return ""
+    try:
+        delta_ms = float(delta_ms)
+        record_ms = float(record_ms)
+    except (TypeError, ValueError):
+        return ""
+    if record_ms <= 0:
+        return ""
+    if delta_ms <= 0:
+        return "good"
+    if delta_ms <= record_ms * 0.02:
+        return "near"
+    if delta_ms > 2000:
+        return "bad"
+    return ""

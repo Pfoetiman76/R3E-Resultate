@@ -22,14 +22,15 @@ import updater
 from rrc import fuelcalc
 from rrc.charts import LineChartWidget
 from rrc.database import Database
-from rrc.models import APP_NAME, APP_VERSION, format_time_ms
+from rrc.models import APP_NAME, APP_VERSION, delta_class, format_time_ms
 from rrc.paths import default_app_dir, default_results_dir, default_db_path
 from rrc.theme import apply_dark_theme
 
 COL_SESSIONS = ["Datum", "Typ", "Strecke", "Fahrer", "Bestzeit"]
 COL_ENTRIES = ["Pos.", "Fahrer", "Fahrzeug", "Runden", "Beste Runde", "Renzeit", "Status"]
 COL_BESTS = ["Fahrer", "Strecke", "Fahrzeug", "Bestzeit", "Fahrten", "Zuletzt"]
-COL_LAPS = ["Runde", "Zeit", "Sektor 1", "Sektor 2", "Sektor 3", "Delta zur besten"]
+COL_LAPS = ["Runde", "Zeit", "Sektor 1", "Sektor 2", "Sektor 3",
+            "Delta zur besten", "Delta Rekord"]
 COL_DNF = ["Fahrer", "Rennstarts", "DNF", "Zielquote %"]
 
 
@@ -295,6 +296,26 @@ class FuelCalculatorDialog(QtWidgets.QDialog):
         super().closeEvent(event)
 
 
+class LapTableModel(GenericTableModel):
+    """Rundentabelle mit farbigen Delta-Zellen (0.4.1)."""
+
+    def __init__(self):
+        super().__init__(COL_LAPS, [])
+        self.colors = {}
+
+    def data(self, index, role=QtCore.Qt.DisplayRole):
+        if role == QtCore.Qt.ForegroundRole:
+            c = self.colors.get((index.row(), index.column()))
+            return QtGui.QColor(c) if c else None
+        return super().data(index, role)
+
+    def set_rows(self, rows, colors):
+        self.beginResetModel()
+        self.rows = rows
+        self.colors = colors
+        self.endResetModel()
+
+
 class MainWindow(QtWidgets.QMainWindow):
     def __init__(self):
         super().__init__()
@@ -306,6 +327,8 @@ class MainWindow(QtWidgets.QMainWindow):
         self.db = Database(self.db_path)
         self._last_dir_stamp = None
         self._current_entries = []   # entries of the selected session (for export)
+        self._lap_session_rows = {}  # session rows of the laps tab (0.4.1)
+        self._lap_records = {}       # track records of the selected laps session
 
         self.tabs = QtWidgets.QTabWidget()
         self.setCentralWidget(self.tabs)
@@ -413,9 +436,32 @@ class MainWindow(QtWidgets.QMainWindow):
             "Multiplayer-Ergebnissen zur Verfügung.")
         self.lbl_laps_hint.setObjectName("hint")
         v.addWidget(self.lbl_laps_hint)
+
+        # Rekord-Kacheln fuer die Strecke der gewaehlten Sitzung (0.4.1)
+        tiles = QtWidgets.QHBoxLayout()
+        self.rec_tiles = {}
+        for key in ("Renn-Rekord", "Quali-Rekord", "Optimal-Runde", "Allzeit-Bestzeit"):
+            box = QtWidgets.QFrame()
+            box.setFixedHeight(64)
+            box.setStyleSheet(
+                "QFrame { background: #1a1a1f; border: 1px solid #26262c; }")
+            lay = QtWidgets.QVBoxLayout(box)
+            k = QtWidgets.QLabel(key)
+            k.setStyleSheet("color: #8f8f99; font-size: 11px; font-weight: 700; "
+                             "background: transparent;")
+            val = QtWidgets.QLabel("–")
+            val.setStyleSheet("color: #f1f1f3; font-size: 17px; font-weight: 800; "
+                              "background: transparent;")
+            lay.addWidget(k)
+            lay.addWidget(val)
+            tiles.addWidget(box)
+            self.rec_tiles[key] = val
+        tiles.addStretch(1)
+        v.addLayout(tiles)
+
         self.tbl_laps = QtWidgets.QTableView()
         self.tbl_laps.setAlternatingRowColors(True)
-        self.laps_model = GenericTableModel(COL_LAPS, [])
+        self.laps_model = LapTableModel()
         self.tbl_laps.setModel(self.laps_model)
         self.tbl_laps.horizontalHeader().setStretchLastSection(True)
         v.addWidget(self.tbl_laps, 1)
@@ -608,8 +654,10 @@ class MainWindow(QtWidgets.QMainWindow):
         cur = self.cmb_lap_session.currentText()
         self.cmb_lap_session.blockSignals(True)
         self.cmb_lap_session.clear()
+        self._lap_session_rows = {}
         for r in self.db.sessions_with_laps():
             self.cmb_lap_session.addItem(self._session_label(r), userData=r["id"])
+            self._lap_session_rows[r["id"]] = r
         if cur:
             idx = self.cmb_lap_session.findText(cur)
             if idx >= 0:
@@ -619,6 +667,17 @@ class MainWindow(QtWidgets.QMainWindow):
 
     def on_lap_session_changed(self, *_):
         sid = self.cmb_lap_session.currentData()
+        # Rekord-Kacheln fuer die Strecke der gewaehlten Sitzung (0.4.1)
+        row = self._lap_session_rows.get(sid)
+        rec = (self.db.track_records(row["track"], row["layout"])
+               if row else {"race_ms": None, "qualify_ms": None,
+                            "best_ms": None, "optimal_ms": None})
+        self.rec_tiles["Renn-Rekord"].setText(format_time_ms(rec["race_ms"]) or "–")
+        self.rec_tiles["Quali-Rekord"].setText(format_time_ms(rec["qualify_ms"]) or "–")
+        self.rec_tiles["Optimal-Runde"].setText(format_time_ms(rec["optimal_ms"]) or "–")
+        self.rec_tiles["Allzeit-Bestzeit"].setText(format_time_ms(rec["best_ms"]) or "–")
+        self._lap_records = rec
+
         self.cmb_lap_driver.blockSignals(True)
         self.cmb_lap_driver.clear()
         if sid is not None:
@@ -631,19 +690,35 @@ class MainWindow(QtWidgets.QMainWindow):
         sid = self.cmb_lap_session.currentData()
         eid = self.cmb_lap_driver.currentData()
         rows = []
+        colors = {}
+        rec = getattr(self, "_lap_records", {}) or {}
+        record_ms = rec.get("best_ms") or 0
         if sid is not None and eid is not None:
             laps = [dict(l) for l in self.db.laps_for_session(sid) if l["entry_id"] == eid]
             best = min((l["lap_time_ms"] for l in laps), default=0)
-            for l in laps:
+            for i, l in enumerate(laps):
                 delta = l["lap_time_ms"] - best if best else 0
                 sign = "+" if delta > 0 else ""
+                d_rec = l["lap_time_ms"] - record_ms if record_ms else None
+                rec_txt = ("-" if d_rec is None else
+                           ("+" + f"{d_rec / 1000.0:.3f}" if d_rec > 0
+                            else f"{d_rec / 1000.0:.3f}"))
                 rows.append([l["lap_no"], format_time_ms(l["lap_time_ms"]),
                              format_time_ms(l["s1_ms"]), format_time_ms(l["s2_ms"]),
                              format_time_ms(l["s3_ms"]),
-                             "beste" if delta == 0 else f"{sign}{delta / 1000.0:.3f}"])
-        self.laps_model.beginResetModel()
-        self.laps_model.rows = rows
-        self.laps_model.endResetModel()
+                             "beste" if delta == 0 else f"{sign}{delta / 1000.0:.3f}",
+                             rec_txt])
+                if delta == 0:
+                    colors[(i, 1)] = "#4caf50"     # beste Runde der Sitzung
+                    colors[(i, 5)] = "#4caf50"
+                cls = delta_class(d_rec, record_ms)
+                if cls == "good":
+                    colors[(i, 6)] = "#4caf50"     # schneller als der Rekord
+                elif cls == "near":
+                    colors[(i, 6)] = "#e8c34a"     # nah dran (innerhalb 2 %)
+                elif cls == "bad":
+                    colors[(i, 6)] = "#f44336"     # Ausrutscher (ueber 2 s)
+        self.laps_model.set_rows(rows, colors)
 
     # ------------------------------------------------------------- Export --
 

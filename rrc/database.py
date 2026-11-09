@@ -281,6 +281,56 @@ class Database:
         q += "ORDER BY s.timestamp DESC LIMIT 500"
         return self.conn.execute(q, params).fetchall()
 
+    # ------------------------------------------------ 0.4.1 Streckenrekorde --
+
+    def track_records(self, track, layout=""):
+        """Streckenrekorde fuer den Runden-Tab (ueber alle Sitzungen).
+
+        Bevorzugt echte Runden aus der laps-Tabelle; je Sitzungstyp
+        Rueckfall auf die besten Runden (best_lap_ms). optimal_ms ist die
+        theoretische Bestzeit aus den besten Einzelsektoren; None, wenn
+        keine vollstaendigen Sektorenzeiten vorliegen.
+        """
+        filt = "s.track = ?" + (" AND s.layout = ?" if layout else "")
+        params = [track] + ([layout] if layout else [])
+
+        def best_lap_of_type(type_like):
+            q = ("SELECT MIN(l.lap_time_ms) FROM laps l "
+                 "JOIN entries e ON e.id = l.entry_id "
+                 "JOIN sessions s ON s.id = e.session_id "
+                 f"WHERE {filt} AND l.lap_time_ms > 0 "
+                 "AND s.session_type LIKE ?")
+            v = self.conn.execute(q, params + [type_like]).fetchone()[0]
+            if v:
+                return v
+            q = ("SELECT MIN(e.best_lap_ms) FROM entries e "
+                 "JOIN sessions s ON s.id = e.session_id "
+                 f"WHERE {filt} AND e.best_lap_ms > 0 "
+                 "AND s.session_type LIKE ?")
+            return self.conn.execute(q, params + [type_like]).fetchone()[0]
+
+        race = best_lap_of_type("Race%")
+        qualify = best_lap_of_type("Qualify%")
+        q_all = ("SELECT MIN(l.lap_time_ms) FROM laps l "
+                 "JOIN entries e ON e.id = l.entry_id "
+                 "JOIN sessions s ON s.id = e.session_id "
+                 f"WHERE {filt} AND l.lap_time_ms > 0")
+        alltime = self.conn.execute(q_all, params).fetchone()[0]
+        if not alltime:
+            q_best = ("SELECT MIN(e.best_lap_ms) FROM entries e "
+                      "JOIN sessions s ON s.id = e.session_id "
+                      f"WHERE {filt} AND e.best_lap_ms > 0")
+            alltime = self.conn.execute(q_best, params).fetchone()[0]
+        q_opt = ("SELECT MIN(l.s1_ms), MIN(l.s2_ms), MIN(l.s3_ms) FROM laps l "
+                 "JOIN entries e ON e.id = l.entry_id "
+                 "JOIN sessions s ON s.id = e.session_id "
+                 f"WHERE {filt} AND l.s1_ms > 0 AND l.s2_ms > 0 "
+                 "AND l.s3_ms > 0")
+        s1, s2, s3 = self.conn.execute(q_opt, params).fetchone()
+        optimal = (s1 + s2 + s3) if (s1 and s2 and s3) else None
+        return {"race_ms": race, "qualify_ms": qualify,
+                "best_ms": alltime, "optimal_ms": optimal}
+
     # ------------------------------------------------- 0.4.0 Kraftstoff --
 
     def avg_lap_ms(self, track, layout="", vehicle="", driver=""):

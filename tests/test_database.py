@@ -157,6 +157,44 @@ class TestDatabase(unittest.TestCase):
         self.assertEqual(vehicles, ["Mercedes-AMG GT3 2020"])
         self.assertEqual(self.db.vehicles_for_track("gibtsnicht"), [])
 
+    # --------------------------------------------------------- 0.4.1 NEU --
+
+    def test_track_records_hockenheim(self):
+        """Laps-basiert: Renn-Rekord, Allzeit, Optimal aus Sektorenbesten."""
+        self.db.ingest_folder(SAMPLES)
+        rec = self.db.track_records("Hockenheim", layout="GP")
+        self.assertEqual(rec["race_ms"], 59870)
+        self.assertIsNone(rec["qualify_ms"])   # keine Qualify-Sitzung vorhanden
+        self.assertEqual(rec["best_ms"], 59870)
+        # beste Sektoren: 19500 + 19800 + 20570 = 59870
+        self.assertEqual(rec["optimal_ms"], 59870)
+
+    def test_track_records_sachsenring_fallbacks(self):
+        """Qualify ohne laps -> Fallback auf best_lap_ms; Optimal aus Gemisch."""
+        self.db.ingest_folder(SAMPLES)
+        rec = self.db.track_records("Sachsenring", layout="ADAC GT Masters")
+        self.assertEqual(rec["qualify_ms"], 79123)  # Fallback best_lap_ms
+        self.assertEqual(rec["race_ms"], 81234)    # echte Runde (Fahrer B)
+        self.assertEqual(rec["best_ms"], 81234)
+        # Sektorenbesten ueber beide Fahrer: 26500 + 26000 + 28234 = 80734
+        self.assertEqual(rec["optimal_ms"], 80734)
+
+    def test_track_records_nordschleine_fallback(self):
+        """SP-Ergebnis ohne laps: Renn-Rekord aus best_lap_ms, keine Optimal."""
+        self.db.ingest_folder(SAMPLES)
+        rec = self.db.track_records("Nordschleife", layout="VLN-Gesamtstrecke")
+        self.assertEqual(rec["race_ms"], 512340)    # Race1 zaehlt zu Race%
+        self.assertEqual(rec["best_ms"], 512340)
+        self.assertIsNone(rec["optimal_ms"])
+
+    def test_track_records_empty(self):
+        self.db.ingest_folder(SAMPLES)
+        rec = self.db.track_records("gibtsnicht")
+        self.assertIsNone(rec["race_ms"])
+        self.assertIsNone(rec["qualify_ms"])
+        self.assertIsNone(rec["best_ms"])
+        self.assertIsNone(rec["optimal_ms"])
+
 
 if __name__ == "__main__":
     unittest.main(verbosity=2)

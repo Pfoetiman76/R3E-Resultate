@@ -3,7 +3,7 @@
 Eigenständige Begleit-App für **RaceRoom Racing Experience** – im Stil von „ACC Results Companion“:
 Sie liest die von RaceRoom erzeugten Ergebnisdateien automatisch ein und bietet eine dauerhafte Historie aller Sitzungen samt persönlichen Bestzeiten. Optik und Update-Mechanik folgen dem Vorbild von PitBoss R3E.
 
-## Funktionen (Version 0.4.0)
+## Funktionen (Version 0.4.1)
 
 - Automatische Überwachung des RaceRoom-Ergebnisordners (alle 5 Sekunden); neue Sitzungen erscheinen ohne Zutun
 - Sitzungshistorie: Datum, Typ, Strecke, Fahrerzahl, Sitzungs-Bestzeit; Klick zeigt das vollständige Ergebnis
@@ -16,6 +16,8 @@ Sie liest die von RaceRoom erzeugten Ergebnisdateien automatisch ein und bietet 
 - Statistik-Tab: Dashboard-Kacheln (Rennen, Siege, Podium, Zielquote, Runden, Allzeit-Bestzeit)
 - Bestzeiten-Entwicklung als Diagramm je Strecke (eigene QPainter-Chart, keine Zusatzabhängigkeit)
 - Unfall-/Ausfall-Analyse: DNF-Quote je Fahrer und Ausfall-Historie (nur Rennen)
+- Rekord-Kacheln im Runden-Tab: Renn-Rekord, Quali-Rekord, theoretische Optimal-Runde (Summe der besten Sektoren) und Allzeit-Bestzeit der gewählten Strecke
+- Farbige Delta-Anzeige je Runde: grün = Rekordklasse, amber = nah dran (innerhalb 2 % der Rekordzeit), rot = Ausrutscher (über 2 s langsamer)
 - Kraftstoffrechner („Werkzeuge → Kraftstoffrechner …“): Bedarfsprognose für Rennen nach Runden oder Minuten
   - Ø Rundenzeit kommt automatisch aus der eigenen Sitzungshistorie (Rundendaten, Fallback: Bestzeiten)
   - Verbrauch pro Runde und Tankgröße pflegen Sie je Strecke/Fahrzeug einmal; die Werte werden in `fuel_history.json` im App-Ordner gespeichert
@@ -72,7 +74,7 @@ Klick-Weg: GitHub → **Releases** → **Draft a new release** → Tag `v0.2.0` 
 | `installer/setup.iss` | Inno-Setup-Installer |
 | `installer/r3e_resultate.spec` | PyInstaller-Spezifikation |
 | `.github/workflows/release.yml` | CI: Tests → EXE → Installer → Release |
-| `tests/` | 23 Unit-Tests (Parser + Datenbank) |
+| `tests/` | 43 Unit-Tests (Parser, Datenbank, Modelle, Kraftstoff) |
 
 Tests ausführen: `python -m unittest discover -s tests`
 
