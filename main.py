@@ -19,6 +19,7 @@ import sys
 from PySide6 import QtCore, QtGui, QtWidgets
 
 import updater
+from rrc import fuelcalc
 from rrc.charts import LineChartWidget
 from rrc.database import Database
 from rrc.models import APP_NAME, APP_VERSION, format_time_ms
@@ -99,6 +100,199 @@ class SessionTableModel(GenericTableModel):
         self.rows = data
         self.endResetModel()
         self._raw = list(rows)
+
+
+class FuelCalculatorDialog(QtWidgets.QDialog):
+    """Kraftstoffprognose, nach dem Vorbild des PitBoss-Spritrechners.
+
+    Bedienung: Runden oder Minuten eingeben - das jeweils andere Feld wird
+    live mitgerechnet (eines ist die Quelle). Verbrauch pro Runde und
+    Tankgroesse werden je Strecke/Fahrzeug in fuel_history.json persistiert.
+    """
+
+    def __init__(self, db, parent=None):
+        super().__init__(parent)
+        self.setWindowTitle("Kraftstoffrechner")
+        self.setMinimumWidth(420)
+        self.db = db
+        self._updating = False   # verhindert Signal-Schleifen
+        self._source = "laps"    # welches Feld zuletzt vom Nutzer editiert wurde
+
+        self.hist_path = fuelcalc.history_path(default_app_dir())
+        self.history = fuelcalc.load_history(self.hist_path)
+
+        form = QtWidgets.QFormLayout(self)
+        self.cmb_track = QtWidgets.QComboBox()
+        self.cmb_vehicle = QtWidgets.QComboBox()
+        self.sp_fuel = QtWidgets.QDoubleSpinBox()
+        self.sp_fuel.setRange(0.0, 50.0)
+        self.sp_fuel.setDecimals(2)
+        self.sp_fuel.setSingleStep(0.05)
+        self.sp_fuel.setSuffix(" l")
+        self.sp_fuel.setMinimumWidth(90)
+        self.sp_tank = QtWidgets.QDoubleSpinBox()
+        self.sp_tank.setRange(0.0, 500.0)
+        self.sp_tank.setDecimals(1)
+        self.sp_tank.setSingleStep(5.0)
+        self.sp_tank.setSuffix(" l")
+        self.sp_tank.setMinimumWidth(90)
+        self.sp_laps = QtWidgets.QDoubleSpinBox()
+        self.sp_laps.setRange(0.0, 2000.0)
+        self.sp_laps.setDecimals(1)
+        self.sp_laps.setMinimumWidth(90)
+        self.sp_min = QtWidgets.QDoubleSpinBox()
+        self.sp_min.setRange(0.0, 1440.0)
+        self.sp_min.setDecimals(1)
+        self.sp_min.setMinimumWidth(90)
+
+        form.addRow("Strecke:", self.cmb_track)
+        form.addRow("Fahrzeug:", self.cmb_vehicle)
+        form.addRow("Verbrauch pro Runde:", self.sp_fuel)
+        form.addRow("Tankgroesse:", self.sp_tank)
+        form.addRow("Runden:", self.sp_laps)
+        form.addRow("Minuten:", self.sp_min)
+
+        self.lbl_basis = QtWidgets.QLabel("")
+        self.lbl_basis.setWordWrap(True)
+        form.addRow(self.lbl_basis)
+        self.lbl_result = QtWidgets.QLabel("")
+        f = self.lbl_result.font()
+        f.setPointSize(f.pointSize() + 3)
+        f.setBold(True)
+        self.lbl_result.setFont(f)
+        form.addRow("Bedarf:", self.lbl_result)
+        self.lbl_tank = QtWidgets.QLabel("")
+        self.lbl_tank.setWordWrap(True)
+        form.addRow(self.lbl_tank)
+
+        btns = QtWidgets.QDialogButtonBox(QtWidgets.QDialogButtonBox.Close)
+        btns.rejected.connect(self.reject)
+        form.addRow(btns)
+
+        self._load_combos()
+        self.cmb_track.currentTextChanged.connect(self._on_track_changed)
+        self.cmb_vehicle.currentTextChanged.connect(self._on_vehicle_changed)
+        self.sp_fuel.valueChanged.connect(self._recalc)
+        self.sp_tank.valueChanged.connect(self._recalc)
+        self.sp_laps.valueChanged.connect(lambda _v: self._on_edited("laps"))
+        self.sp_min.valueChanged.connect(lambda _v: self._on_edited("minutes"))
+        self._on_track_changed()
+
+    # ------------------------------------------------------------ Laden --
+
+    def _load_combos(self):
+        self.cmb_track.blockSignals(True)
+        self.cmb_track.clear()
+        for r in self.db.tracks():
+            label = r["track"] + ((f" - {r['layout']}") if r["layout"] else "")
+            self.cmb_track.addItem(label, (r["track"], r["layout"]))
+        self.cmb_track.blockSignals(False)
+
+    def _current_track(self):
+        data = self.cmb_track.currentData()
+        return data if data else ("", "")
+
+    def _on_track_changed(self, *_):
+        track, _layout = self._current_track()
+        vehicles = self.db.vehicles_for_track(track) or [""]
+        self.cmb_vehicle.blockSignals(True)
+        self.cmb_vehicle.clear()
+        self.cmb_vehicle.addItems(vehicles)
+        self.cmb_vehicle.blockSignals(False)
+        self._on_vehicle_changed()
+
+    def _on_vehicle_changed(self, *_):
+        track, layout = self._current_track()
+        vehicle = self.cmb_vehicle.currentText()
+        entry = fuelcalc.get_entry(self.history, track, vehicle)
+        self.sp_fuel.blockSignals(True)
+        self.sp_tank.blockSignals(True)
+        self.sp_fuel.setValue(float(entry.get("fuel_l", 0.0) or 0.0))
+        self.sp_tank.setValue(float(entry.get("capacity", 0.0) or 0.0))
+        self.sp_fuel.blockSignals(False)
+        self.sp_tank.blockSignals(False)
+        self._recalc()
+
+    # ------------------------------------------------------- Rechnung --
+
+    def _current_lap_s(self):
+        """Ø Rundenzeit aus der eigenen Historie (DB), in Sekunden."""
+        track, layout = self._current_track()
+        avg_ms = self.db.avg_lap_ms(track, layout=layout,
+                                    vehicle=self.cmb_vehicle.currentText())
+        return (avg_ms / 1000.0) if avg_ms else None
+
+    def _on_edited(self, source):
+        self._source = source
+        self._recalc()
+
+    def _recalc(self, *_):
+        if self._updating:
+            return
+        self._updating = True
+        try:
+            lap_s = self._current_lap_s()
+            fuel_lap = self.sp_fuel.value()
+            capacity = self.sp_tank.value()
+            laps = self.sp_laps.value()
+            minutes = self.sp_min.value()
+
+            if lap_s:
+                if self._source == "laps":
+                    self.sp_min.setValue(fuelcalc.minutes_from_laps(laps, lap_s))
+                else:
+                    self.sp_laps.setValue(fuelcalc.laps_from_minutes(minutes, lap_s))
+                laps = self.sp_laps.value()
+            # ohne Rundenzeit bleiben beide Felder frei editierbar,
+            # die Quelle ist dann schlicht die Rundenzahl selbst.
+
+            fuel = fuelcalc.fuel_needed(laps, fuel_lap)
+            self.lbl_result.setText(f"{fuel:.2f} l" if fuel else "-")
+
+            if fuel and capacity:
+                if fuelcalc.fits_tank(fuel, capacity):
+                    self.lbl_tank.setText("Passt in den Tank.")
+                    self.lbl_tank.setStyleSheet("color: #4caf50;")
+                else:
+                    self.lbl_tank.setText("Mehr als der Tank fasst!")
+                    self.lbl_tank.setStyleSheet("color: #f44336;")
+            else:
+                self.lbl_tank.setText("")
+                self.lbl_tank.setStyleSheet("")
+
+            if lap_s:
+                self.lbl_basis.setText(f"Ø {fuel_lap:.2f} l/Runde · Ø Runde "
+                                       f"{format_time_ms(int(lap_s * 1000))} · Quelle: Datenbank")
+            else:
+                self.lbl_basis.setText("Ø Rundenzeit unbekannt - bitte Runden direkt eingeben.")
+        finally:
+            self._updating = False
+
+    # ---------------------------------------------------- Persistenz --
+
+    def _save_entry(self):
+        track, _layout = self._current_track()
+        vehicle = self.cmb_vehicle.currentText()
+        if not track or not vehicle:
+            return
+        fuelcalc.put_entry(self.history, track, vehicle,
+                           self.sp_fuel.value(), self.sp_tank.value())
+        try:
+            fuelcalc.save_history(self.hist_path, self.history)
+        except OSError:
+            pass
+
+    def accept(self):
+        self._save_entry()
+        super().accept()
+
+    def reject(self):
+        self._save_entry()
+        super().reject()
+
+    def closeEvent(self, event):
+        self._save_entry()
+        super().closeEvent(event)
 
 
 class MainWindow(QtWidgets.QMainWindow):
@@ -314,6 +508,11 @@ class MainWindow(QtWidgets.QMainWindow):
         act_quit.triggered.connect(self.close)
         m.addAction(act_quit)
 
+        mw = self.menuBar().addMenu("&Werkzeuge")
+        act_fuel = QtGui.QAction("Kraftstoffrechner …", self)
+        act_fuel.triggered.connect(self.open_fuel_calculator)
+        mw.addAction(act_fuel)
+
         mh = self.menuBar().addMenu("&Hilfe")
         act_update = QtGui.QAction("Nach Updates suchen …", self)
         act_update.triggered.connect(self.check_updates_manual)
@@ -323,6 +522,10 @@ class MainWindow(QtWidgets.QMainWindow):
         mh.addAction(act_about)
 
     # ------------------------------------------------------------- Logic --
+
+    def open_fuel_calculator(self):
+        dlg = FuelCalculatorDialog(self.db, self)
+        dlg.exec()
 
     def _dir_stamp(self):
         try:

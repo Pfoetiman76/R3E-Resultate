@@ -3,7 +3,7 @@
 Eigenständige Begleit-App für **RaceRoom Racing Experience** – im Stil von „ACC Results Companion“:
 Sie liest die von RaceRoom erzeugten Ergebnisdateien automatisch ein und bietet eine dauerhafte Historie aller Sitzungen samt persönlichen Bestzeiten. Optik und Update-Mechanik folgen dem Vorbild von PitBoss R3E.
 
-## Funktionen (Version 0.3.0)
+## Funktionen (Version 0.4.0)
 
 - Automatische Überwachung des RaceRoom-Ergebnisordners (alle 5 Sekunden); neue Sitzungen erscheinen ohne Zutun
 - Sitzungshistorie: Datum, Typ, Strecke, Fahrerzahl, Sitzungs-Bestzeit; Klick zeigt das vollständige Ergebnis
@@ -16,6 +16,10 @@ Sie liest die von RaceRoom erzeugten Ergebnisdateien automatisch ein und bietet 
 - Statistik-Tab: Dashboard-Kacheln (Rennen, Siege, Podium, Zielquote, Runden, Allzeit-Bestzeit)
 - Bestzeiten-Entwicklung als Diagramm je Strecke (eigene QPainter-Chart, keine Zusatzabhängigkeit)
 - Unfall-/Ausfall-Analyse: DNF-Quote je Fahrer und Ausfall-Historie (nur Rennen)
+- Kraftstoffrechner („Werkzeuge → Kraftstoffrechner …“): Bedarfsprognose für Rennen nach Runden oder Minuten
+  - Ø Rundenzeit kommt automatisch aus der eigenen Sitzungshistorie (Rundendaten, Fallback: Bestzeiten)
+  - Verbrauch pro Runde und Tankgröße pflegen Sie je Strecke/Fahrzeug einmal; die Werte werden in `fuel_history.json` im App-Ordner gespeichert
+  - Tank-Check zeigt sofort, ob die prognostizierte Menge in den Tank passt (wie der Sprit-Rechner in PitBoss)
 - Automatische Update-Prüfung beim Start + „Hilfe → Nach Updates suchen …“ mit Ein-Klick-Download des Installers
 - SQLite-Datenbank – einmal eingelesen bleibt alles dauerhaft gespeichert; Duplikate werden erkannt
 - Unterstützte Formate:
@@ -82,5 +86,4 @@ Hinweis: Rundendetails (Runden-/Sektorenzeiten) werden erst mit Version 0.3.0 in
 
 ## Geplante Erweiterungen
 
-- Kraftstoffprognose aus historischen Runden (benötigt hinterlegbare Verbrauchswerte je Auto)
 - Bestzeiten-Vergleich gegen Mitfahrer über mehrere Sitzungen

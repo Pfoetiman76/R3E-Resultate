@@ -194,6 +194,14 @@ class Database:
             "SELECT track, layout, COUNT(*) AS n FROM sessions "
             "GROUP BY track, layout ORDER BY track, layout").fetchall()
 
+    def vehicles_for_track(self, track):
+        """Distinct vehicles driven on a track (for the fuel calculator)."""
+        return [r["vehicle"] for r in self.conn.execute(
+            "SELECT DISTINCT e.vehicle FROM entries e "
+            "JOIN sessions s ON s.id = e.session_id "
+            "WHERE s.track = ? AND e.vehicle != '' ORDER BY e.vehicle",
+            (track,))]
+
     def progression(self, track, layout="", vehicle="", driver=""):
         """Best lap per session over time (for the chart)."""
         q = ("SELECT s.timestamp, MIN(e.best_lap_ms) AS best_ms "
@@ -272,3 +280,43 @@ class Database:
             params.append(driver)
         q += "ORDER BY s.timestamp DESC LIMIT 500"
         return self.conn.execute(q, params).fetchall()
+
+    # ------------------------------------------------- 0.4.0 Kraftstoff --
+
+    def avg_lap_ms(self, track, layout="", vehicle="", driver=""):
+        """Durchschnittliche Rundenzeit in ms fuer den Kraftstoffrechner.
+
+        Bevorzugt echte Runden aus der laps-Tabelle; Fallback ist der
+        Durchschnitt der besten Runden (best_lap_ms). Rueckgabe None,
+        wenn ueberhaupt keine Zeiten vorliegen.
+        """
+        q_laps = ("SELECT AVG(l.lap_time_ms) AS avg_ms "
+                  "FROM laps l "
+                  "JOIN entries e ON e.id = l.entry_id "
+                  "JOIN sessions s ON s.id = e.session_id "
+                  "WHERE s.track = ? AND l.lap_time_ms > 0 ")
+        params = [track]
+        if layout:
+            q_laps += "AND s.layout = ? "
+            params.append(layout)
+        if vehicle:
+            q_laps += "AND e.vehicle = ? "
+            params.append(vehicle)
+        if driver:
+            q_laps += "AND e.name = ? "
+            params.append(driver)
+        row = self.conn.execute(q_laps, params).fetchone()
+        if row and row["avg_ms"]:
+            return round(row["avg_ms"], 1)
+        # Fallback: Durchschnitt der besten Runden (gleiche Filter).
+        q_best = ("SELECT AVG(e.best_lap_ms) AS avg_ms "
+                  "FROM entries e JOIN sessions s ON s.id = e.session_id "
+                  "WHERE s.track = ? AND e.best_lap_ms > 0 ")
+        q_best += "".join(part for part, cond in (
+            ("AND s.layout = ? ", layout),
+            ("AND e.vehicle = ? ", vehicle),
+            ("AND e.name = ? ", driver)) if cond)
+        row = self.conn.execute(q_best, params).fetchone()
+        if row and row["avg_ms"]:
+            return round(row["avg_ms"], 1)
+        return None

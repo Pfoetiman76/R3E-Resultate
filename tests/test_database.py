@@ -131,6 +131,32 @@ class TestDatabase(unittest.TestCase):
         self.assertIn(("Hockenheim", "GP"), combos)
         self.assertIn(("Nordschleife", "VLN-Gesamtstrecke"), combos)
 
+    # --------------------------------------------------------- 0.4.0 NEU --
+
+    def test_avg_lap_ms_from_laps(self):
+        """Hockenheim: Marcels Runden 61000 + 59870 ms -> Mittel 60435."""
+        self.db.ingest_folder(SAMPLES)
+        avg = self.db.avg_lap_ms("Hockenheim", layout="GP",
+                                 vehicle="Mercedes-AMG GT3 2020",
+                                 driver="Marcel Wijnandts")
+        self.assertAlmostEqual(avg, 60435.0, places=1)
+
+    def test_avg_lap_ms_fallback_best(self):
+        """Nordschleife (SP) hat keine laps -> Fallback auf best_lap_ms."""
+        self.db.ingest_folder(SAMPLES)
+        avg = self.db.avg_lap_ms("Nordschleife", layout="VLN-Gesamtstrecke")
+        self.assertAlmostEqual(avg, (512340 + 522100) / 2, places=1)
+
+    def test_avg_lap_ms_unknown(self):
+        self.db.ingest_folder(SAMPLES)
+        self.assertIsNone(self.db.avg_lap_ms("gibtsnicht"))
+
+    def test_vehicles_for_track(self):
+        self.db.ingest_folder(SAMPLES)
+        vehicles = self.db.vehicles_for_track("Hockenheim")
+        self.assertEqual(vehicles, ["Mercedes-AMG GT3 2020"])
+        self.assertEqual(self.db.vehicles_for_track("gibtsnicht"), [])
+
 
 if __name__ == "__main__":
     unittest.main(verbosity=2)
