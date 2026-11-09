@@ -36,6 +36,8 @@ COL_BESTS = ["Fahrer", "Strecke", "Fahrzeug", "Bestzeit", "Fahrten", "Zuletzt"]
 COL_LAPS = ["Runde", "Zeit", "Sektor 1", "Sektor 2", "Sektor 3",
             "Delta zur besten", "Delta Rekord"]
 COL_DNF = ["Fahrer", "Rennstarts", "DNF", "Zielquote %"]
+COL_AGGR_NUM = ["Sitzungen", "Rennen", "Siege", "Podium", "Zielquote %",
+                "Ø Bestzeit", "Allzeit-Bestzeit", "Runden", "DNF"]
 
 
 class UpdateCheckWorker(QtCore.QThread):
@@ -357,6 +359,7 @@ class MainWindow(QtWidgets.QMainWindow):
         self._build_laps_tab()
         self._build_bests_tab()
         self._build_stats_tab()
+        self._build_aggregate_tab()
         self._build_menu()
 
         self.lbl_perm = QtWidgets.QLabel("")
@@ -614,6 +617,97 @@ class MainWindow(QtWidgets.QMainWindow):
         v.addWidget(self.tbl_dnf)
         self.tabs.addTab(page, "Statistik")
 
+    def _build_aggregate_tab(self):
+        """Reiter Auswertung (0.4.9): Historie je Strecke/Fahrzeug."""
+        page = QtWidgets.QWidget()
+        v = QtWidgets.QVBoxLayout(page)
+
+        row = QtWidgets.QHBoxLayout()
+        row.addWidget(QtWidgets.QLabel("Gruppierung:"))
+        self.cmb_aggr = QtWidgets.QComboBox()
+        self.cmb_aggr.addItems(["nach Strecke", "nach Fahrzeug"])
+        self.cmb_aggr.currentIndexChanged.connect(self.refresh_aggregate)
+        row.addWidget(self.cmb_aggr)
+        btn_details = QtWidgets.QPushButton("Details …")
+        btn_details.clicked.connect(self.show_aggregate_details)
+        row.addWidget(btn_details)
+        btn_csv = QtWidgets.QPushButton("CSV-Export")
+        btn_csv.clicked.connect(self.export_aggregate_csv)
+        row.addWidget(btn_csv)
+        row.addStretch(1)
+        v.addLayout(row)
+
+        self.tbl_aggr = QtWidgets.QTableView()
+        self.tbl_aggr.setAlternatingRowColors(False)
+        self.tbl_aggr.setSelectionBehavior(QtWidgets.QAbstractItemView.SelectRows)
+        self.tbl_aggr.setSelectionMode(QtWidgets.QAbstractItemView.SingleSelection)
+        self.aggr_model = GenericTableModel(["Strecke"] + COL_AGGR_NUM, [],
+                                            mono_cols=tuple(range(1, 10)))
+        self.tbl_aggr.setModel(self.aggr_model)
+        self.tbl_aggr.horizontalHeader().setStretchLastSection(True)
+        self.tbl_aggr.setColumnWidth(0, 380)
+        v.addWidget(self.tbl_aggr)
+        self.tabs.addTab(page, "Auswertung")
+
+    def refresh_aggregate(self, *_):
+        """Auswertungstabelle entsprechend der Gruppierung neu aufbauen."""
+        by = "track" if self.cmb_aggr.currentText() == "nach Strecke" else "vehicle"
+        rows = self.db.aggregate(by, names=self._name_filter())
+        cols = (["Strecke"] if by == "track" else ["Fahrzeug"]) + COL_AGGR_NUM
+        data = []
+        for r in rows:
+            data.append([
+                r["label"], r["sessions"], r["races"], r["wins"], r["podium"],
+                f"{r['quote']:.1f} %".replace(".", ","),
+                format_time_ms(r["avg_best_ms"]) or "–",
+                format_time_ms(r["best_ms"]) or "–",
+                r["total_laps"], r["dnfs"]])
+        self.aggr_model.beginResetModel()
+        self.aggr_model.columns = cols
+        self.aggr_model.rows = data
+        self.aggr_model.endResetModel()
+        self._aggr_raw = rows
+        self._aggr_by = by
+
+    def show_aggregate_details(self):
+        """Gewaehlte Gruppe im Sitzungs-Reiter filtern."""
+        sel = self.tbl_aggr.selectionModel().selectedRows()
+        if not sel:
+            QtWidgets.QMessageBox.information(
+                self, "Details",
+                "Bitte wählen Sie zuerst eine Zeile aus.")
+            return
+        r = self._aggr_raw[sel[0].row()]
+        self.tabs.setCurrentIndex(0)
+        if self._aggr_by == "track":
+            self.ed_search.setText(r["label"].split(" - ")[0])
+            self.cmb_vehicle_filter.setCurrentIndex(0)
+        else:
+            self.ed_search.setText("")
+            idx = max(0, self.cmb_vehicle_filter.findText(r["label"]))
+            self.cmb_vehicle_filter.setCurrentIndex(idx)
+        self.refresh_sessions()
+
+    def export_aggregate_csv(self):
+        """Auswertungstabelle als CSV (Semikolon, utf-8-sig) sichern."""
+        if not self.aggr_model.rows:
+            return
+        path, _ = QtWidgets.QFileDialog.getSaveFileName(
+            self, "Auswertung exportieren",
+            os.path.join(default_app_dir(), "Auswertung.csv"), "*.csv")
+        if not path:
+            return
+        try:
+            with open(path, "w", newline="", encoding="utf-8-sig") as f:
+                w = csv.writer(f, delimiter=";")
+                w.writerow(self.aggr_model.columns)
+                w.writerows(self.aggr_model.rows)
+        except OSError as e:
+            QtWidgets.QMessageBox.warning(
+                self, "Export", f"Export fehlgeschlagen: {e}")
+            return
+        self.statusBar().showMessage(f"CSV exportiert: {path}", 8000)
+
     def _build_menu(self):
         m = self.menuBar().addMenu("&Datei")
         act_settings = QtGui.QAction("Ergebnis-Ordner wählen …", self)
@@ -697,6 +791,7 @@ class MainWindow(QtWidgets.QMainWindow):
         self.on_driver_changed_full(self.cmb_driver.currentText())
         self._reload_tracks()
         self._reload_filter_combos()
+        self.refresh_aggregate()
 
     def _driver_names(self):
         return self.db.drivers(names=self._name_filter())

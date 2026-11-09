@@ -384,6 +384,75 @@ class Database:
                  podium=podium, finishes=finishes)
         return d, wins
 
+    def aggregate(self, by: str = "track", driver: str = "", names=None):
+        """Auswertung je Strecke oder je Fahrzeug (0.4.9).
+
+        by: 'track' gruppiert nach Strecke - Layout, 'vehicle' nach Fahrzeug.
+        names: None = alle Fahrer; Liste = nur diese (KI-Ausblendung);
+        leere Liste = leeres Ergebnis. Zaehlweise wie Statistik: Siege und
+        Podium nur im eigenen Eintrag, Zielquote = Ziele pro Renneinsatz,
+        DNF = Ausfall in Rennen. Rueckgabe: Liste von dicts mit label,
+        sessions, races, race_entries, wins, podium, finishes, dnfs,
+        total_laps, best_ms, avg_best_ms, quote.
+        """
+        if names is not None and not names:
+            return []
+        if by == "track":
+            label = ("s.track || CASE WHEN s.layout != '' AND s.layout != "
+                      "'(Layout-Id)' THEN ' - ' || s.layout ELSE '' END")
+        else:
+            label = "e.vehicle"
+        conds, params = [], []
+        if driver:
+            conds.append("e.name = ?")
+            params.append(driver)
+        if names is not None:
+            conds.append("e.name IN (" + ",".join("?" * len(names)) + ")")
+            params.extend(names)
+        cond = ("AND " + " AND ".join(conds) + " ") if conds else ""
+        q = (
+            "SELECT " + label + " AS label, "
+            "COUNT(DISTINCT s.id) AS sessions, "
+            "COUNT(DISTINCT CASE WHEN s.session_type LIKE 'Race%' "
+            "  THEN s.id END) AS races, "
+            "SUM(CASE WHEN s.session_type LIKE 'Race%' THEN 1 ELSE 0 END) "
+            "  AS race_entries, "
+            "SUM(CASE WHEN s.session_type LIKE 'Race%' AND e.position = 1 "
+            "  THEN 1 ELSE 0 END) AS wins, "
+            "SUM(CASE WHEN s.session_type LIKE 'Race%' "
+            "  AND e.position BETWEEN 1 AND 3 THEN 1 ELSE 0 END) AS podium, "
+            "SUM(CASE WHEN s.session_type LIKE 'Race%' "
+            "  AND (e.finish_status = '' OR LOWER(e.finish_status) "
+            "       = 'finished') THEN 1 ELSE 0 END) AS finishes, "
+            "SUM(CASE WHEN s.session_type LIKE 'Race%' "
+            "  AND ((e.finish_status != '' AND LOWER(e.finish_status) "
+            "       != 'finished') OR e.position = 0) THEN 1 ELSE 0 END) "
+            "  AS dnfs, "
+            "SUM(e.laps) AS total_laps, "
+            "MIN(CASE WHEN e.best_lap_ms > 0 THEN e.best_lap_ms END) "
+            "  AS best_ms, "
+            "AVG(CASE WHEN e.best_lap_ms > 0 THEN e.best_lap_ms END) "
+            "  AS avg_best_ms "
+            "FROM entries e JOIN sessions s ON s.id = e.session_id "
+            "WHERE 1=1 " + cond +
+            "GROUP BY " + label +
+            " ORDER BY sessions DESC, label")
+        rows = self.conn.execute(q, params).fetchall()
+        out = []
+        for r in rows:
+            re_ = r["race_entries"] or 0
+            fin = r["finishes"] or 0
+            out.append({
+                "label": r["label"], "sessions": r["sessions"],
+                "races": r["races"] or 0, "race_entries": re_,
+                "wins": r["wins"] or 0, "podium": r["podium"] or 0,
+                "finishes": fin, "dnfs": r["dnfs"] or 0,
+                "total_laps": r["total_laps"] or 0, "best_ms": r["best_ms"],
+                "avg_best_ms": r["avg_best_ms"],
+                "quote": (fin * 100.0 / re_) if re_ else 0.0,
+            })
+        return out
+
     def dnf_summary(self, driver: str = "", names=None):
         """Per driver: race starts, DNFs, finish rate. Only race sessions."""
         if names is not None and not names:
