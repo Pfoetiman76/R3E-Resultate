@@ -49,7 +49,8 @@ class TestAppSettings(unittest.TestCase):
         with open(path, "w", encoding="utf-8") as f:
             f.write("{kein json")
         s = appsettings.load_settings(path)
-        self.assertEqual(s, {"real_drivers": [], "hide_ai": False})
+        self.assertEqual(s, {"real_drivers": [], "hide_ai": False,
+                             "r3e_install_dir": ""})
 
     def test_real_drivers_string_is_split(self):
         """Alte/handgeschriebene Datei mit String statt Liste wird vertragen."""

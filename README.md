@@ -3,7 +3,7 @@
 Eigenständige Begleit-App für **RaceRoom Racing Experience** – im Stil von „ACC Results Companion“:
 Sie liest die von RaceRoom erzeugten Ergebnisdateien automatisch ein und bietet eine dauerhafte Historie aller Sitzungen samt persönlichen Bestzeiten. Optik und Update-Mechanik folgen dem Vorbild von PitBoss R3E.
 
-## Funktionen (Version 0.4.6)
+## Funktionen (Version 0.4.7)
 
 - Überarbeitete Optik: kompakte Tabellen mit feinen Gitterlinien (keine Zebra-Streifen), Zeit- und Delta-Werte in technischer Schrift (Consolas), aktiver Reiter und Auswahl in RaceRoom-Rot, Rekordwerte gelb hervorgehoben, dauerhafte Statusanzeige (Sitzungen · Runden · Datenbank)
 - Automatische Überwachung des RaceRoom-Ergebnisordners (alle 5 Sekunden); neue Sitzungen erscheinen ohne Zutun
@@ -25,6 +25,7 @@ Sie liest die von RaceRoom erzeugten Ergebnisdateien automatisch ein und bietet 
 - Eigenes App-Symbol (Stoppuhr mit Schriftzug, freigegebene Kombination): Fenster- und Taskleistensymbol; der Installer nutzt es ebenfalls für Programm und Desktop-Verknüpfung
 - Korrigierte Statistik (0.4.6): Zielquote berechnet sich als Ziele pro Renneinsatz (zuvor fälschlich pro Sitzung, was bei vielen Fahrern je Rennen Werte über 100 % lieferte); die KI-Fahrer-Ausblendung wirkt jetzt auch auf Statistik-Kacheln und DNF-Tabelle
 - Strecken-Id-Auflösung: Einzelspieler-Ergebnisse von RaceRoom nennen die Strecke nur als interne Nummer. Die App übersetzt bekannte Ids automatisch in lesbare Namen (z. B. „Hockenheimring Classic – Grand Prix“); unbekannte Ids ordnen Sie einmalig über „Werkzeuge → Unbekannte Strecken-Ids zuordnen …“ zu – die Zuordnung wird gespeichert und auf alle vorhandenen und künftigen Sitzungen angewendet
+- Offizielle Spieldatenbank (0.4.7): unter „Werkzeuge → RaceRoom-Installation wählen …“ hinterlegen Sie einmalig den RaceRoom-Installationsordner (Steam: Bibliothek → RaceRoom Racing Experience → Verwaltung → Verwalten → Lokale Dateien durchsuchen). Die App liest die mit jedem Spielupdate aktualisierte Spieldatenbank `r3e-data.json` und übersetzt damit auch neuere Strecken- und Fahrzeug-Ids automatisch; die Spieldatenbank hat Vorrang vor den eingebauten Tabellen, Ihre eigenen Zuordnungen haben weiterhin obersten Vorrang
   - Ø Rundenzeit kommt automatisch aus der eigenen Sitzungshistorie (Rundendaten, Fallback: Bestzeiten)
   - Verbrauch pro Runde und Tankgröße pflegen Sie je Strecke/Fahrzeug einmal; die Werte werden in `fuel_history.json` im App-Ordner gespeichert
   - Tank-Check zeigt sofort, ob die prognostizierte Menge in den Tank passt (wie der Sprit-Rechner in PitBoss)
@@ -83,7 +84,7 @@ Klick-Weg: GitHub → **Releases** → **Draft a new release** → Tag `v0.2.0` 
 | `installer/setup.iss` | Inno-Setup-Installer |
 | `installer/r3e_resultate.spec` | PyInstaller-Spezifikation |
 | `.github/workflows/release.yml` | CI: Tests → EXE → Installer → Release |
-| `tests/` | 75 Unit-Tests (Parser, Datenbank, Modelle, Einstellungen, Kraftstoff, Id-Auflösung, Icon, Statistik) |
+| `tests/` | 82 Unit-Tests (Parser, Datenbank, Modelle, Einstellungen, Kraftstoff, Id-Auflösung, Icon, Statistik, Spieldatenbank) |
 
 Tests ausführen: `python -m unittest discover -s tests`
 

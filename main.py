@@ -344,7 +344,11 @@ class MainWindow(QtWidgets.QMainWindow):
         self.settings = appsettings.load_settings(self.settings_path)
         self.user_names_path = trackids.user_names_path(default_app_dir())
         self.user_names = trackids.load_user_names(self.user_names_path)
-        self.db.upgrade_ids(self.user_names)
+        self.official = None
+        install_dir = self.settings.get("r3e_install_dir") or ""
+        if install_dir:
+            self.official = trackids.load_official(install_dir)
+        self.db.upgrade_ids(self.user_names, self.official)
 
         self.tabs = QtWidgets.QTabWidget()
         self.setCentralWidget(self.tabs)
@@ -632,6 +636,9 @@ class MainWindow(QtWidgets.QMainWindow):
         act_ids = QtGui.QAction("Unbekannte Strecken-Ids zuordnen …", self)
         act_ids.triggered.connect(self.assign_track_ids)
         mw.addAction(act_ids)
+        act_r3e = QtGui.QAction("RaceRoom-Installation wählen …", self)
+        act_r3e.triggered.connect(self.choose_raceroom_install)
+        mw.addAction(act_r3e)
 
         mh = self.menuBar().addMenu("&Hilfe")
         act_update = QtGui.QAction("Nach Updates suchen …", self)
@@ -1090,11 +1097,48 @@ class MainWindow(QtWidgets.QMainWindow):
             else:
                 self.user_names.setdefault("cars", {})[id_] = text
         trackids.save_user_names(self.user_names_path, self.user_names)
-        n_t, n_v = self.db.upgrade_ids(self.user_names)
+        n_t, n_v = self.db.upgrade_ids(self.user_names, self.official)
         self.refresh()
         self._update_status_totals()
         self.statusBar().showMessage(
             f"{n_t} Strecken und {n_v} Fahrzeuge umbenannt.", 10000)
+
+    def choose_raceroom_install(self):
+        """Offizielle Spieldatenbank der RaceRoom-Installation einbinden
+        (0.4.7): liest r3e-data.json und loest damit Strecken-/Fahrzeug-Ids
+        auf, auch solche, die aeltere als den eingebauten Tabellen sind."""
+        cur = self.settings.get("r3e_install_dir") or ""
+        d = QtWidgets.QFileDialog.getExistingDirectory(
+            self, "RaceRoom-Installationsordner wählen",
+            cur or os.path.join("C:\\Program Files (x86)\\Steam\\steamapps\\common",
+                                "RaceRoom Racing Experience"))
+        if not d:
+            return
+        if not trackids.find_official_data(d):
+            QtWidgets.QMessageBox.warning(
+                self, "RaceRoom-Installation",
+                "In diesem Ordner wurde keine Spieldatenbank (r3e-data.json) "
+                "gefunden.\n\nBitte wählen Sie den RaceRoom-Installationsordner "
+                "aus. Klick-Weg in Steam:\nBibliothek → RaceRoom Racing Experience "
+                "→ Verwaltung (Zahnrad) → Verwalten → Lokale Dateien durchsuchen.")
+            return
+        self.settings["r3e_install_dir"] = d
+        self._save_settings()
+        self.official = trackids.load_official(d)
+        n_t, n_v = self.db.upgrade_ids(self.user_names, self.official)
+        self.refresh()
+        self._update_status_totals()
+        n_layouts = len((self.official or {}).get("layouts") or {})
+        n_cars = len((self.official or {}).get("cars") or {})
+        QtWidgets.QMessageBox.information(
+            self, "RaceRoom-Installation",
+            f"Spieldatenbank eingebunden: {n_layouts} Strecken-Layouts, "
+            f"{n_cars} Fahrzeuge erkannt.\n"
+            f"{n_t} Strecken und {n_v} Fahrzeuge in der Datenbank wurden "
+            f"umbenannt.\n\nKünftig werden neue Ids automatisch beim Einlesen "
+            f"aufgelöst.")
+        self.statusBar().showMessage(
+            "RaceRoom-Spieldatenbank eingebunden.", 8000)
 
     def choose_folder(self):
         d = QtWidgets.QFileDialog.getExistingDirectory(
