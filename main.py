@@ -22,6 +22,7 @@ from PySide6 import QtCore, QtGui, QtWidgets
 import updater
 from rrc import fuelcalc
 from rrc import appsettings
+from rrc import trackids
 from rrc.charts import LineChartWidget
 from rrc.database import Database
 from rrc.models import APP_NAME, APP_VERSION, delta_class, format_time_ms
@@ -340,6 +341,9 @@ class MainWindow(QtWidgets.QMainWindow):
         self._lap_records = {}       # track records of the selected laps session
         self.settings_path = appsettings.settings_path(default_app_dir())
         self.settings = appsettings.load_settings(self.settings_path)
+        self.user_names_path = trackids.user_names_path(default_app_dir())
+        self.user_names = trackids.load_user_names(self.user_names_path)
+        self.db.upgrade_ids(self.user_names)
 
         self.tabs = QtWidgets.QTabWidget()
         self.setCentralWidget(self.tabs)
@@ -591,6 +595,9 @@ class MainWindow(QtWidgets.QMainWindow):
         act_drivers = QtGui.QAction("Echte Fahrer festlegen …", self)
         act_drivers.triggered.connect(self.edit_real_drivers)
         mw.addAction(act_drivers)
+        act_ids = QtGui.QAction("Unbekannte Strecken-Ids zuordnen …", self)
+        act_ids.triggered.connect(self.assign_track_ids)
+        mw.addAction(act_ids)
 
         mh = self.menuBar().addMenu("&Hilfe")
         act_update = QtGui.QAction("Nach Updates suchen …", self)
@@ -961,6 +968,65 @@ class MainWindow(QtWidgets.QMainWindow):
             self.on_driver_changed(self.cmb_driver.currentText())
         self.statusBar().showMessage(
             f"{len(names)} echte Fahrer gespeichert.", 5000)
+
+    def assign_track_ids(self):
+        """Unbekannte numerische RaceRoom-Ids einmalig benennen (0.4.4)."""
+        track_ids = self.db.unresolved_track_ids()
+        car_ids = self.db.unresolved_car_ids()
+        if not track_ids and not car_ids:
+            QtWidgets.QMessageBox.information(
+                self, "Strecken-Ids",
+                "Es liegen keine unbekannten Strecken- oder Fahrzeug-Ids vor. "
+                "Alle Einträge sind bereits mit Namen hinterlegt.")
+            return
+        dlg = QtWidgets.QDialog(self)
+        dlg.setWindowTitle("Unbekannte RaceRoom-Ids zuordnen")
+        form = QtWidgets.QFormLayout(dlg)
+        hint = QtWidgets.QLabel(
+            "RaceRoom nennt die Strecke in Einzelspieler-Ergebnissen nur als "
+            "interne Nummer. Bitte tragen Sie die Namen einmalig ein - sie "
+            "werden dauerhaft gespeichert und auf alle vorhandenen und "
+            "künftigen Sitzungen angewendet.")
+        hint.setWordWrap(True)
+        form.addRow(hint)
+        fields = {}
+        for tid in track_ids:
+            e = QtWidgets.QLineEdit()
+            e.setPlaceholderText("z. B. Nürburgring - Grand Prix")
+            fields[("layout", tid)] = e
+            form.addRow(f"Strecken-Id {tid}:", e)
+        for cid in car_ids:
+            e = QtWidgets.QLineEdit()
+            e.setPlaceholderText("z. B. Audi R8 LMS GT3")
+            fields[("car", cid)] = e
+            form.addRow(f"Fahrzeug-Id {cid}:", e)
+        btns = QtWidgets.QDialogButtonBox(
+            QtWidgets.QDialogButtonBox.Ok | QtWidgets.QDialogButtonBox.Cancel)
+        btns.accepted.connect(dlg.accept)
+        btns.rejected.connect(dlg.reject)
+        form.addRow(btns)
+        dlg.resize(480, dlg.sizeHint().height())
+        if dlg.exec() != QtWidgets.QDialog.Accepted:
+            return
+        for (kind, id_), e in fields.items():
+            text = e.text().strip()
+            if not text:
+                continue
+            if kind == "layout":
+                if " - " in text:
+                    track, layout = text.split(" - ", 1)
+                else:
+                    track, layout = text, ""
+                self.user_names.setdefault("layouts", {})[id_] = [
+                    track.strip(), layout.strip()]
+            else:
+                self.user_names.setdefault("cars", {})[id_] = text
+        trackids.save_user_names(self.user_names_path, self.user_names)
+        n_t, n_v = self.db.upgrade_ids(self.user_names)
+        self.refresh()
+        self._update_status_totals()
+        self.statusBar().showMessage(
+            f"{n_t} Strecken und {n_v} Fahrzeuge umbenannt.", 10000)
 
     def choose_folder(self):
         d = QtWidgets.QFileDialog.getExistingDirectory(

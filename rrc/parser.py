@@ -14,6 +14,7 @@ import os
 import re
 import xml.etree.ElementTree as ET
 
+from . import paths
 from .models import LapEntry, PlayerResult, Session
 
 # Session type suffixes used by R3E result file names:
@@ -84,19 +85,37 @@ def parse_sp_json(data: dict, filename: str = "") -> Session:
         layout=str(_first(event, "layout", default="") or ""),
         source_file=os.path.basename(filename),
     )
-    if not sess.track and _first(event, "layoutId"):
-        sess.track = str(_first(event, "layoutId"))
-        sess.layout = "(Layout-Id)"
+    if not sess.track:
+        layout_id = _first(event, "layoutId", "layoutid")
+        if layout_id:
+            # RaceRoom names tracks in SP results only by a numeric layout ID.
+            # Translate it into a readable name where possible.
+            from . import trackids
+            mapped = trackids.resolve_layout_with(layout_id, trackids.load_user_names(
+                trackids.user_names_path(paths.default_app_dir())))
+            if mapped:
+                sess.track, sess.layout = mapped[0], mapped[1]
+            else:
+                sess.track = str(layout_id)
+                sess.layout = "(Layout-Id)"
 
+    from . import trackids
+    user_names = trackids.load_user_names(
+        trackids.user_names_path(paths.default_app_dir()))
     for d in data.get("drivers") or []:
         if not isinstance(d, dict):
             continue
         name = _first(d, "name", default="")
         if not name:
             continue
+        vehicle = str(_first(d, "vehicle", "car", default="") or "")
+        if trackids.is_id(vehicle):
+            resolved = trackids.resolve_car_with(vehicle, user_names)
+            if resolved:
+                vehicle = resolved
         sess.players.append(PlayerResult(
             name=str(name),
-            vehicle=str(_first(d, "vehicle", "car", default="") or ""),
+            vehicle=vehicle,
             team=str(_first(d, "team", default="") or ""),
             position=_ms(_first(d, "place", "position", default=0)),
             laps=_ms(_first(d, "totallaps", "totalLaps", "laps", default=0)),

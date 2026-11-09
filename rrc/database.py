@@ -125,6 +125,45 @@ class Database:
 
     # ------------------------------------------------------------ queries --
 
+    def unresolved_track_ids(self):
+        """Distinct numeric track IDs without a readable name."""
+        rows = self.conn.execute(
+            "SELECT DISTINCT track FROM sessions "
+            "WHERE layout = '(Layout-Id)' ORDER BY track").fetchall()
+        return [r["track"] for r in rows]
+
+    def unresolved_car_ids(self):
+        """Distinct numeric vehicle IDs in entries."""
+        rows = self.conn.execute(
+            "SELECT DISTINCT vehicle FROM entries "
+            "WHERE vehicle GLOB '[0-9]*' AND vehicle NOT GLOB '*[^0-9]*' "
+            "ORDER BY CAST(vehicle AS INTEGER)").fetchall()
+        return [r["vehicle"] for r in rows]
+
+    def upgrade_ids(self, user_names):
+        """Re-resolve numeric track and vehicle IDs against the given
+        user mappings (built-in tables are used as fallback). Returns
+        (n_tracks, n_vehicles) updated."""
+        from . import trackids
+        n_tracks = n_vehicles = 0
+        for tid in self.unresolved_track_ids():
+            mapped = trackids.resolve_layout_with(tid, user_names)
+            if mapped:
+                self.conn.execute(
+                    "UPDATE sessions SET track = ?, layout = ? "
+                    "WHERE track = ? AND layout = '(Layout-Id)'",
+                    (mapped[0], mapped[1], tid))
+                n_tracks += 1
+        for cid in self.unresolved_car_ids():
+            mapped = trackids.resolve_car_with(cid, user_names)
+            if mapped:
+                self.conn.execute(
+                    "UPDATE entries SET vehicle = ? WHERE vehicle = ?",
+                    (mapped, cid))
+                n_vehicles += 1
+        self.conn.commit()
+        return n_tracks, n_vehicles
+
     def sessions(self, limit=5000, search="", session_type="", driver="",
                  names=None):
         """Session list, optional filters: free text (track/driver), type, driver.
