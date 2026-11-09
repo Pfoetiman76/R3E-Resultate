@@ -165,8 +165,10 @@ class Database:
         return n_tracks, n_vehicles
 
     def sessions(self, limit=5000, search="", session_type="", driver="",
-                 names=None):
-        """Session list, optional filters: free text (track/driver), type, driver.
+                 names=None, date_from="", date_to="", track="",
+                 vehicle=""):
+        """Session list, optional filters: free text (track/driver), type,
+        driver, date range (YYYY-MM-DD), track, vehicle.
 
         Order: newest first. n_players counts all entries; driver_best_ms is the
         best lap of the (optionally filtered) driver in that session.
@@ -192,6 +194,20 @@ class Database:
         if session_type:
             where.append("s.session_type LIKE ?")
             params.append(f"{session_type}%")
+        if date_from:
+            # timestamp ist 'YYYY-MM-DD HH:MM:SS' -> Stringvergleich genügt
+            where.append("s.timestamp >= ?")
+            params.append(f"{date_from} 00:00:00")
+        if date_to:
+            where.append("s.timestamp <= ?")
+            params.append(f"{date_to} 23:59:59")
+        if track:
+            where.append("s.track = ?")
+            params.append(track)
+        if vehicle:
+            where.append("s.id IN (SELECT session_id FROM entries "
+                         "WHERE vehicle = ?)")
+            params.append(vehicle)
         if where:
             q += "WHERE " + " AND ".join(where) + " "
         q += ("GROUP BY s.id")
@@ -275,6 +291,13 @@ class Database:
             "JOIN sessions s ON s.id = e.session_id "
             "WHERE s.track = ? AND e.vehicle != '' ORDER BY e.vehicle",
             (track,))]
+
+    def vehicles(self):
+        """Distinct vehicle names in entries (for the filter combo)."""
+        rows = self.conn.execute(
+            "SELECT DISTINCT vehicle FROM entries "
+            "WHERE vehicle != '' ORDER BY vehicle").fetchall()
+        return [r["vehicle"] for r in rows]
 
     def progression(self, track, layout="", vehicle="", driver=""):
         """Best lap per session over time (for the chart)."""
