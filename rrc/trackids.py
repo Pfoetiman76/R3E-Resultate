@@ -723,7 +723,8 @@ def load_official(install_dir):
         key = _as_int(lid)
         if key is None or key in layouts:
             continue
-        tname = track_names.get(str(lay.get("TrackId") or ""), "")
+        tname = track_names.get(
+            str(lay.get("TrackId") or lay.get("Track") or ""), "")
         layouts[key] = (tname, str(lay.get("Name") or ""))
     for cid, c in (data.get("cars") or {}).items():
         if isinstance(c, dict):

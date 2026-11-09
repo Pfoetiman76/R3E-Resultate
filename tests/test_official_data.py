@@ -68,6 +68,21 @@ class TestOfficialData(unittest.TestCase):
         self.assertEqual(official["layouts"][9911], ("Overlay-Ring", "Lang"))
         self.assertEqual(official["cars"][555], "Community-Wagen")
 
+    def test_load_official_real_game_schema(self):
+        """Echte Spieldatei (Stand 2026): Layouts verweisen mit dem
+        Schluessel 'Track' (nicht 'TrackId') auf die Strecken."""
+        data = {
+            "tracks": {"42": {"Name": "Testring 2026"}},
+            "layouts": {"2578": {"Name": "Grand Prix", "Track": 42,
+                                 "Id": 2578}},
+            "cars": {"17112": {"Name": "Testwagen 2026"}},
+        }
+        self._write(data)
+        official = trackids.load_official(self.install)
+        self.assertEqual(official["layouts"][2578], ("Testring 2026",
+                                                     "Grand Prix"))
+        self.assertEqual(official["cars"][17112], "Testwagen 2026")
+
     def test_load_official_invalid(self):
         self.assertIsNone(trackids.load_official(self.install))  # no file
         self._write({"nichts": "brauchbares"})
