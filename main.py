@@ -5,21 +5,55 @@ A standalone companion app for RaceRoom Racing Experience:
 - session history with full result details
 - personal best times per track/layout/car
 - basic statistics
+- dark PitBoss-style theme, update check over GitHub Releases
 
 Run: python main.py
 """
 import os
+import subprocess
 import sys
 
 from PySide6 import QtCore, QtGui, QtWidgets
 
+import updater
 from rrc.database import Database
 from rrc.models import APP_NAME, APP_VERSION, format_time_ms
-from rrc.paths import default_results_dir, default_db_path
+from rrc.paths import default_app_dir, default_results_dir, default_db_path
+from rrc.theme import apply_dark_theme
 
 COL_SESSIONS = ["Datum", "Typ", "Strecke", "Fahrer", "Bestzeit"]
 COL_ENTRIES = ["Pos.", "Fahrer", "Fahrzeug", "Runden", "Beste Runde", "Renzeit", "Status"]
 COL_BESTS = ["Fahrer", "Strecke", "Fahrzeug", "Bestzeit", "Fahrten", "Zuletzt"]
+
+
+class UpdateCheckWorker(QtCore.QThread):
+    """Update-Pruefung im Hintergrund (blockiert die UI nicht)."""
+    result = QtCore.Signal(object, str)  # (info | None, fehler)
+
+    def run(self):
+        try:
+            self.result.emit(updater.check_for_update(APP_VERSION), "")
+        except Exception as e:
+            self.result.emit(None, str(e))
+
+
+class UpdateDownloadWorker(QtCore.QThread):
+    """Laedt den Installer im Hintergrund und meldet Fortschritt."""
+    progress = QtCore.Signal(int, int)
+    finished_result = QtCore.Signal(str, str)  # (pfad, fehler)
+
+    def __init__(self, url, dest, parent=None):
+        super().__init__(parent)
+        self.url = url
+        self.dest = dest
+
+    def run(self):
+        try:
+            updater.download_asset(self.url, self.dest,
+                                   progress_cb=lambda d, t: self.progress.emit(int(d), int(t)))
+            self.finished_result.emit(self.dest, "")
+        except Exception as e:
+            self.finished_result.emit("", str(e))
 
 
 class SessionTableModel(QtCore.QAbstractTableModel):
@@ -97,16 +131,19 @@ class MainWindow(QtWidgets.QMainWindow):
 
         # --- Tab: Sitzungen ---
         page = QtWidgets.QWidget()
+        page.setObjectName("rootBg")
         v = QtWidgets.QVBoxLayout(page)
         self.btn_rescan = QtWidgets.QPushButton("Jetzt einlesen")
+        self.btn_rescan.setObjectName("primary")
         self.btn_rescan.clicked.connect(self.rescan)
         bar = QtWidgets.QHBoxLayout()
         bar.addWidget(self.btn_rescan)
         self.lbl_dir = QtWidgets.QLabel("")
-        self.lbl_dir.setStyleSheet("color: #888;")
+        self.lbl_dir.setStyleSheet("color: #8f8f99;")
         bar.addWidget(self.lbl_dir, 1)
         v.addLayout(bar)
         self.tbl_sessions = QtWidgets.QTableView()
+        self.tbl_sessions.setAlternatingRowColors(True)
         self.sess_model = SessionTableModel([])
         self.tbl_sessions.setModel(self.sess_model)
         self.tbl_sessions.setSelectionBehavior(QtWidgets.QTableView.SelectRows)
@@ -117,8 +154,10 @@ class MainWindow(QtWidgets.QMainWindow):
         self.tbl_sessions.selectionModel().selectionChanged.connect(self.on_session_selected)
         v.addWidget(self.tbl_sessions, 1)
         lbl_detail = QtWidgets.QLabel("Ergebnisdetails:")
+        lbl_detail.setObjectName("sectionTitle")
         v.addWidget(lbl_detail)
         self.tbl_entries = QtWidgets.QTableView()
+        self.tbl_entries.setAlternatingRowColors(True)
         self.entries_model = GenericTableModel(COL_ENTRIES, [])
         self.tbl_entries.setModel(self.entries_model)
         self.tbl_entries.horizontalHeader().setStretchLastSection(True)
@@ -129,7 +168,9 @@ class MainWindow(QtWidgets.QMainWindow):
         page2 = QtWidgets.QWidget()
         v2 = QtWidgets.QVBoxLayout(page2)
         combo_row = QtWidgets.QHBoxLayout()
-        combo_row.addWidget(QtWidgets.QLabel("Fahrer:"))
+        lbl_driver = QtWidgets.QLabel("Fahrer:")
+        lbl_driver.setObjectName("sectionTitle")
+        combo_row.addWidget(lbl_driver)
         self.cmb_driver = QtWidgets.QComboBox()
         self.cmb_driver.setMinimumWidth(220)
         self.cmb_driver.currentTextChanged.connect(self.on_driver_changed)
@@ -137,12 +178,13 @@ class MainWindow(QtWidgets.QMainWindow):
         combo_row.addStretch(1)
         v2.addLayout(combo_row)
         self.tbl_bests = QtWidgets.QTableView()
+        self.tbl_bests.setAlternatingRowColors(True)
         self.bests_model = GenericTableModel(COL_BESTS, [])
         self.tbl_bests.setModel(self.bests_model)
         self.tbl_bests.horizontalHeader().setStretchLastSection(True)
         v2.addWidget(self.tbl_bests, 1)
         self.lbl_stats = QtWidgets.QLabel("")
-        self.lbl_stats.setStyleSheet("color: #888;")
+        self.lbl_stats.setObjectName("hint")
         v2.addWidget(self.lbl_stats)
         self.tabs.addTab(page2, "Bestzeiten")
 
@@ -159,6 +201,14 @@ class MainWindow(QtWidgets.QMainWindow):
         act_quit.triggered.connect(self.close)
         m.addAction(act_quit)
 
+        mh = self.menuBar().addMenu("&Hilfe")
+        act_update = QtGui.QAction("Nach Updates suchen …", self)
+        act_update.triggered.connect(self.check_updates_manual)
+        mh.addAction(act_update)
+        act_about = QtGui.QAction(f"Über {APP_NAME}", self)
+        act_about.triggered.connect(self.show_about)
+        mh.addAction(act_about)
+
         # --- Auto-Watch ---
         self.watch_timer = QtCore.QTimer(self)
         self.watch_timer.setInterval(5000)
@@ -167,6 +217,7 @@ class MainWindow(QtWidgets.QMainWindow):
 
         self.lbl_dir.setText(self.results_dir)
         self.rescan(silent=True)
+        self._auto_check_updates()
 
     # ------------------------------------------------------------- Logic --
 
@@ -237,7 +288,7 @@ class MainWindow(QtWidgets.QMainWindow):
         stats, wins = self.db.stats_summary(driver)
         total_laps = stats.get("total_laps") or 0
         self.lbl_stats.setText(
-            f"Sitzungen: {stats['sessions']} · Fahrzeugeinsätze: {stats['entries']} "
+            f"Sitzungen: {stats['sessions']} · Renneinsätze: {stats['entries']} "
             f"· Runden gesamt: {total_laps} · Siege: {wins} · "
             f"Allzeit-Bestzeit: {format_time_ms(stats['best_ms'])}")
 
@@ -249,6 +300,110 @@ class MainWindow(QtWidgets.QMainWindow):
             self.lbl_dir.setText(d)
             self.rescan()
 
+    # ----------------------------------------------------------- Updates --
+
+    def check_updates_manual(self):
+        self.statusBar().showMessage("Prüfe auf Updates …")
+        QtWidgets.QApplication.processEvents()
+        try:
+            info = updater.check_for_update(APP_VERSION)
+        except Exception as e:
+            QtWidgets.QMessageBox.warning(self, "Update",
+                                          f"Update-Prüfung fehlgeschlagen: {e}")
+            return
+        self.statusBar().clearMessage()
+        if info is None:
+            QtWidgets.QMessageBox.information(self, "Update",
+                                             f"Sie sind aktuell (v{APP_VERSION}).")
+            return
+        self._show_update_dialog(info)
+
+    def _auto_check_updates(self):
+        """Beim Start: im Hintergrund pruefen; nur melden, wenn es ein Update gibt."""
+        self._upd_check = UpdateCheckWorker(self)
+
+        def on_result(info, err):
+            if err:
+                self.statusBar().showMessage(f"Update-Prüfung: {err}", 8000)
+            elif info is not None:
+                self._show_update_dialog(info)
+
+        self._upd_check.result.connect(on_result)
+        self._upd_check.start()
+
+    def _show_update_dialog(self, info):
+        box = QtWidgets.QMessageBox(self)
+        box.setWindowTitle("Update verfügbar")
+        box.setText(f"Neue Version {info['version']} verfügbar.\n"
+                    f"Installiert: {APP_VERSION}.")
+        if info.get("notes"):
+            box.setInformativeText(info["notes"][:600])
+        dl_btn = None
+        if info.get("asset_url"):
+            dl_btn = box.addButton("Herunterladen & installieren",
+                                   QtWidgets.QMessageBox.AcceptRole)
+        open_btn = box.addButton("Download-Seite öffnen", QtWidgets.QMessageBox.AcceptRole)
+        box.addButton("Später", QtWidgets.QMessageBox.RejectRole)
+        box.exec()
+        clicked = box.clickedButton()
+        if dl_btn is not None and clicked is dl_btn:
+            self._download_and_launch(info)
+        elif clicked is open_btn:
+            QtGui.QDesktopServices.openUrl(QtCore.QUrl(info["url"]))
+
+    def _download_and_launch(self, info):
+        url = info.get("asset_url") or ""
+        if not url:
+            QtGui.QDesktopServices.openUrl(QtCore.QUrl(info["url"]))
+            return
+        try:
+            updates_dir = os.path.join(default_app_dir(), "updates")
+            os.makedirs(updates_dir, exist_ok=True)
+        except Exception:
+            updates_dir = os.path.expanduser("~")
+        fname = os.path.basename(url.split("?")[0]) or "R3E-Resultate-Setup.exe"
+        dest = os.path.join(updates_dir, fname)
+
+        prog = QtWidgets.QProgressDialog("Installer wird heruntergeladen …",
+                                         "Abbrechen", 0, 100, self)
+        prog.setWindowTitle("Update")
+        prog.setMinimumDuration(0)
+        prog.show()
+
+        self._dl_worker = UpdateDownloadWorker(url, dest, self)
+        self._dl_worker.progress.connect(lambda d, t: prog.setMaximum(int(t) if t else 100),
+                                         QtCore.Qt.QueuedConnection)
+        self._dl_worker.progress.connect(prog.setValue, QtCore.Qt.QueuedConnection)
+
+        def on_done(path, err):
+            prog.close()
+            if err:
+                QtWidgets.QMessageBox.warning(self, "Update",
+                                              f"Download fehlgeschlagen: {err}")
+                return
+            QtWidgets.QMessageBox.information(
+                self, "Update",
+                "Installer heruntergeladen. Die App wird jetzt beendet und\n"
+                "der Installer gestartet.")
+            try:
+                subprocess.Popen([path], cwd=os.path.dirname(path))
+            except Exception as e:
+                QtWidgets.QMessageBox.warning(self, "Update",
+                                              f"Installer konnte nicht gestartet "
+                                              f"werden: {e}")
+                return
+            self.close()
+
+        self._dl_worker.finished_result.connect(on_done, QtCore.Qt.QueuedConnection)
+        self._dl_worker.start()
+
+    def show_about(self):
+        QtWidgets.QMessageBox.about(
+            self, APP_NAME,
+            f"{APP_NAME}\nVersion {APP_VERSION}\n\n"
+            f"Sitzungshistorie und Bestzeiten für RaceRoom Racing Experience.\n"
+            f"Updates: https://github.com/{updater.GITHUB_REPO}/releases")
+
     def closeEvent(self, ev):
         self.watch_timer.stop()
         self.db.close()
@@ -258,6 +413,8 @@ class MainWindow(QtWidgets.QMainWindow):
 def main():
     app = QtWidgets.QApplication(sys.argv)
     app.setApplicationName(APP_NAME)
+    app.setApplicationVersion(APP_VERSION)
+    apply_dark_theme(app)
     win = MainWindow()
     win.show()
     sys.exit(app.exec())

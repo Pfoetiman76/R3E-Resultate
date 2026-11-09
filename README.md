@@ -1,14 +1,16 @@
-# RaceRoom Results Companion
+# RaceRoom Results Companion (R3E Resultate)
 
 Eigenständige Begleit-App für **RaceRoom Racing Experience** – im Stil von „ACC Results Companion“:
-Sie liest die von RaceRoom erzeugten Ergebnisdateien automatisch ein und bietet eine dauerhafte Historie aller Sitzungen samt persönlichen Bestzeiten.
+Sie liest die von RaceRoom erzeugten Ergebnisdateien automatisch ein und bietet eine dauerhafte Historie aller Sitzungen samt persönlichen Bestzeiten. Optik und Update-Mechanik folgen dem Vorbild von PitBoss R3E.
 
-## Funktionen (Version 0.1.0)
+## Funktionen (Version 0.2.0)
 
 - Automatische Überwachung des RaceRoom-Ergebnisordners (alle 5 Sekunden); neue Sitzungen erscheinen ohne Zutun
-- Sitzungshistorie: Datum, Typ, Strecke, Fahrerzahl, Sitzungs-Bestzeit; Klick zeigt das vollständige Ergebnis (Position, Fahrer, Fahrzeug, Runden, beste Runde, Renzeit, Status)
+- Sitzungshistorie: Datum, Typ, Strecke, Fahrerzahl, Sitzungs-Bestzeit; Klick zeigt das vollständige Ergebnis
 - Bestzeiten pro Fahrer / Strecke / Fahrzeug
 - Statistik-Kopfzeile: Sitzungen, Renneinsätze, Runden gesamt, Siege (nur Rennen), Allzeit-Bestzeit
+- Dunkles PitBoss-Theme (RaceRoom-Rot-Akzent, Fusion-Stil)
+- Automatische Update-Prüfung beim Start + „Hilfe → Nach Updates suchen …“ mit Ein-Klick-Download des Installers
 - SQLite-Datenbank – einmal eingelesen bleibt alles dauerhaft gespeichert; Duplikate werden erkannt
 - Unterstützte Formate:
   - Lokale Einzelspieler-Ergebnisse (`.txt`, seit Mai 2023 JSON) aus `Dokumente\My Games\SimBin\RaceRoom Racing Experience\UserData\Log\Results`
@@ -27,31 +29,49 @@ Sie liest die von RaceRoom erzeugten Ergebnisdateien automatisch ein und bietet 
 python main.py
 ```
 
-Der Ergebnisordner wird automatisch erkannt (standardmäßig der RaceRoom-Ordner unter Dokumente). Über **Datei → Ergebnis-Ordner wählen …** lässt er sich ändern;über **Neu einlesen** wird manuell neu gescannt.
+## Windows-Installer erstellen (GitHub Actions)
 
-Server- oder Multiplayer-Dateien werden einfach in denselben Ordner kopiert (oder ein beliebiger Ordner gewählt).
+Der Workflow `.github/workflows/release.yml` baut bei jedem Tag `v*` (z. B. `v0.2.0`) automatisch:
+
+1. Unit-Tests
+2. PyInstaller-Build (`dist/R3EResultate`)
+3. Inno-Setup-Installer (`R3E-Resultate-Setup-<Version>.exe`)
+4. GitHub-Release mit dem Installer als Anhang
+
+Klick-Weg: GitHub → **Releases** → **Draft a new release** → Tag `v0.2.0` eingeben, Ziel `main` → **Publish release**. Der Build dauert einige Minuten; danach hängt der Installer am Release. Wichtig: Tag-Name und `APP_VERSION` in `rrc/models.py` müssen identisch sein, sonst meldet der Updater fälschlich ein Update.
+
+## Automatische Updates
+
+- Beim App-Start wird im Hintergrund über `api.github.com/repos/Pfoetiman76/R3E-Resultate/releases/latest` geprüft (blockiert die UI nicht; ohne Token nutzbar).
+- Bei einer neueren Version erscheint ein Dialog mit Änderungsnotizen und den Schaltflächen „Herunterladen & installieren“ (Installer wird geladen, App beendet sich, Installer startet) bzw. „Download-Seite öffnen“.
+- Manuelle Prüfung: **Hilfe → Nach Updates suchen …**
+- Netzwerkstörungen (z. B. temporäre GitHub-504-Fehler) werden mit mehreren Wiederholungen überstanden.
 
 ## Projektstruktur
 
 | Datei | Zweck |
 |---|---|
-| `main.py` | PySide6-Oberfläche (Tabs: Sitzungen, Bestzeiten) |
+| `main.py` | PySide6-Oberfläche (Tabs: Sitzungen, Bestzeiten; Update-Dialoge) |
+| `rrc/theme.py` | Dunkles PitBoss-Theme (QSS, RaceRoom-Rot-Akzent) |
 | `rrc/parser.py` | Formatunabhängiger Parser (SP-JSON, Dedicated-JSON, Multiplayer-XML) |
 | `rrc/database.py` | SQLite-Speicher mit Duplikaterkennung (Digest) |
-| `rrc/models.py` | Datenmodelle + Zeitformatierung |
+| `rrc/models.py` | Datenmodelle + Zeitformatierung + `APP_VERSION` |
 | `rrc/paths.py` | Standardpfade (Ergebnisordner, Datenbank) |
+| `updater.py` | GitHub-Releases-Updateprüfung + Installer-Download (bewährtes PitBoss-Modul) |
+| `installer/setup.iss` | Inno-Setup-Installer |
+| `installer/r3e_resultate.spec` | PyInstaller-Spezifikation |
+| `.github/workflows/release.yml` | CI: Tests → EXE → Installer → Release |
 | `tests/` | 17 Unit-Tests (Parser + Datenbank) |
 
 Tests ausführen: `python -m unittest discover -s tests`
 
 ## Technische Hinweise
 
-- Kernelemente (Parser, Datenbank) sind Qt-frei und damit unabhängig testbar.
-- Duplikaterkennung über MD5-Digest über Datei, Sitzungstyp, Zeit, Strecke, Fahrer, Positionen und Bestzeiten – erneutes Einlesen ändern nichts.
-- `bestlaptimems`, `qualtimems`, `racetimems` werden tolerant gelesen (Groß-/Kleinschreibung, Varianten wie `bestLapTime`).
+- Kernelemente (Parser, Datenbank, Updater) sind Qt-frei und damit unabhängig testbar.
+- Duplikaterkennung über MD5-Digest über Datei, Sitzungstyp, Zeit, Strecke, Fahrer, Positionen und Bestzeiten.
 - Fehlerhafte oder unvollständige Dateien werden übersprungen und in der Statuszeile als „unlesbar“ gezählt; die App stürzt dadurch nicht ab.
 
-## Geplante Erweiterungen (Rückmeldung willkommen)
+## Geplante Erweiterungen
 
 - Runden-für-Runden-Ansicht der Server-Ergebnisse (Sektorenzeiten liegen bereits im Parser)
 - CSV/HTML-Export einzelner Sitzungen

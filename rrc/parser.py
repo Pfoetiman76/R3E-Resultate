@@ -184,10 +184,6 @@ def parse_dedicated_json(data: dict, filename: str = "") -> list:
 
 # ------------------------------------------------------- Multiplayer XML ---
 
-def _xml_children(node):
-    return list(node)
-
-
 def _xml_sessions(root, filename: str) -> list:
     ts_raw = root.findtext("Time") or ""
     ts = ""

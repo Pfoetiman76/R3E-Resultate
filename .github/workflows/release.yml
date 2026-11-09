@@ -1,0 +1,69 @@
+name: Build & Release
+
+on:
+  push:
+    tags: ['v*']          # Release wird bei Tags wie v0.2.0 gebaut
+  workflow_dispatch: {}    # manuell ausloesbar
+
+permissions:
+  contents: write          # noetig, um Release-Assets anzuhaengen
+
+jobs:
+  build-windows:
+    runs-on: windows-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v6
+
+      - uses: actions/setup-python@v6
+        with:
+          python-version: '3.13'
+
+      - name: Abhaengigkeiten
+        run: pip install PySide6 pyinstaller
+
+      - name: Version aus Tag ableiten
+        shell: bash
+        run: echo "APP_VERSION=${GITHUB_REF_NAME#v}" >> "$GITHUB_ENV"
+
+      - name: Tests ausfuehren
+        shell: bash
+        run: python -m unittest discover -s tests -v
+
+      - name: PyInstaller-Build
+        shell: pwsh
+        run: |
+          pyinstaller installer/r3e_resultate.spec --noconfirm
+          if ($LASTEXITCODE -ne 0) { throw "PyInstaller fehlgeschlagen (Exit $LASTEXITCODE)" }
+
+      - name: Dist-Groesse ausgeben
+        shell: pwsh
+        run: |
+          $files = Get-ChildItem dist\R3EResultate -Recurse -File
+          $sum = ($files | Measure-Object Length -Sum).Sum
+          Write-Host ("dist gesamt: {0:N1} MB ({1} Dateien)" -f ($sum/1MB), $files.Count)
+
+      - name: Inno Setup installieren
+        run: choco install innosetup -y --no-progress
+
+      - name: Installer bauen
+        shell: pwsh
+        run: |
+          iscc installer\setup.iss
+          if ($LASTEXITCODE -ne 0) { throw "Installer fehlgeschlagen (Exit $LASTEXITCODE)" }
+          Get-ChildItem installer\Output | ForEach-Object { Write-Host ("{0,10:N2} MB  {1}" -f ($_.Length/1MB), $_.Name) }
+
+      # Fail-Loud vor dem Upload: Installer muss existieren und plausibel gross sein.
+      - name: Installer pruefen
+        shell: pwsh
+        run: |
+          $setup = Get-ChildItem 'installer/Output/R3E-Resultate-Setup-*.exe' | Select-Object -First 1
+          if (-not $setup) { throw 'Installer fehlt in installer/Output' }
+          if ($setup.Length -lt 20MB) { throw "Installer verdaechtig klein ($([math]::Round($setup.Length/1MB,1)) MB < 20 MB)" }
+          Write-Host ("Installer OK: {0:N1} MB ({1})" -f ($setup.Length/1MB), $setup.Name)
+
+      - name: Release veroeffentlichen
+        uses: softprops/action-gh-release@v3
+        with:
+          files: installer/Output/R3E-Resultate-Setup-*.exe
+          generate_release_notes: true
