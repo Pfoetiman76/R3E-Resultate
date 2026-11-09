@@ -9,7 +9,7 @@ import json
 import os
 
 SETTINGS_FILENAME = "settings.json"
-DEFAULTS = {"real_drivers": [], "hide_ai": False}
+DEFAULTS = {"real_drivers": [], "hide_ai": False, "r3e_install_dir": ""}
 
 
 def settings_path(app_dir):
@@ -34,6 +34,7 @@ def load_settings(path):
                              if d.strip()]
     s["real_drivers"] = [str(d).strip() for d in s["real_drivers"] if str(d).strip()]
     s["hide_ai"] = bool(s["hide_ai"])
+    s["r3e_install_dir"] = str(s["r3e_install_dir"] or "").strip()
     return s
 
 
@@ -43,6 +44,7 @@ def save_settings(path, settings):
     clean["real_drivers"] = [str(d).strip() for d in clean["real_drivers"]
                              if str(d).strip()]
     clean["hide_ai"] = bool(clean["hide_ai"])
+    clean["r3e_install_dir"] = str(clean["r3e_install_dir"] or "").strip()
     os.makedirs(os.path.dirname(os.path.abspath(path)) or ".", exist_ok=True)
     tmp = path + ".tmp"
     with open(tmp, "w", encoding="utf-8") as f:

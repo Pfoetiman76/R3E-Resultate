@@ -1,6 +1,6 @@
 """RaceRoom Results Companion (RRC) - parsed result models."""
 APP_NAME = "RaceRoom Results Companion"
-APP_VERSION = "0.4.6"
+APP_VERSION = "0.4.7"
 
 from dataclasses import dataclass, field
 

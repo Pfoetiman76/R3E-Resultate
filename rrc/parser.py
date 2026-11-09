@@ -26,6 +26,27 @@ _FILENAME_RE = re.compile(
 )
 
 
+def _load_id_maps():
+    """Load ID mappings from the app data folder: user-defined mappings
+    (track_names.json) and, if a RaceRoom installation folder is set in
+    settings.json, the official game data (r3e-data.json). Returns
+    (user, official); official is None when unavailable."""
+    from . import trackids
+    user = trackids.load_user_names(
+        trackids.user_names_path(paths.default_app_dir()))
+    official = None
+    try:
+        from . import appsettings
+        settings = appsettings.load_settings(
+            appsettings.settings_path(paths.default_app_dir()))
+        install_dir = settings.get("r3e_install_dir") or ""
+        if install_dir:
+            official = trackids.load_official(install_dir)
+    except Exception:
+        official = None
+    return user, official
+
+
 def _first(d, *keys, default=None):
     """Return first present, non-None value of keys in dict d (case-insensitive fallback)."""
     for k in keys:
@@ -91,8 +112,9 @@ def parse_sp_json(data: dict, filename: str = "") -> Session:
             # RaceRoom names tracks in SP results only by a numeric layout ID.
             # Translate it into a readable name where possible.
             from . import trackids
-            mapped = trackids.resolve_layout_with(layout_id, trackids.load_user_names(
-                trackids.user_names_path(paths.default_app_dir())))
+            user_names, official = _load_id_maps()
+            mapped = trackids.resolve_layout_with(layout_id, user_names,
+                                                  official)
             if mapped:
                 sess.track, sess.layout = mapped[0], mapped[1]
             else:
@@ -100,8 +122,7 @@ def parse_sp_json(data: dict, filename: str = "") -> Session:
                 sess.layout = "(Layout-Id)"
 
     from . import trackids
-    user_names = trackids.load_user_names(
-        trackids.user_names_path(paths.default_app_dir()))
+    user_names, official = _load_id_maps()
     for d in data.get("drivers") or []:
         if not isinstance(d, dict):
             continue
@@ -110,7 +131,8 @@ def parse_sp_json(data: dict, filename: str = "") -> Session:
             continue
         vehicle = str(_first(d, "vehicle", "car", default="") or "")
         if trackids.is_id(vehicle):
-            resolved = trackids.resolve_car_with(vehicle, user_names)
+            resolved = trackids.resolve_car_with(vehicle, user_names,
+                                                 official)
             if resolved:
                 vehicle = resolved
         sess.players.append(PlayerResult(

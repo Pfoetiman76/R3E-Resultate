@@ -140,14 +140,14 @@ class Database:
             "ORDER BY CAST(vehicle AS INTEGER)").fetchall()
         return [r["vehicle"] for r in rows]
 
-    def upgrade_ids(self, user_names):
+    def upgrade_ids(self, user_names, official=None):
         """Re-resolve numeric track and vehicle IDs against the given
-        user mappings (built-in tables are used as fallback). Returns
-        (n_tracks, n_vehicles) updated."""
+        user mappings (official game data next, built-in tables as
+        fallback). Returns (n_tracks, n_vehicles) updated."""
         from . import trackids
         n_tracks = n_vehicles = 0
         for tid in self.unresolved_track_ids():
-            mapped = trackids.resolve_layout_with(tid, user_names)
+            mapped = trackids.resolve_layout_with(tid, user_names, official)
             if mapped:
                 self.conn.execute(
                     "UPDATE sessions SET track = ?, layout = ? "
@@ -155,7 +155,7 @@ class Database:
                     (mapped[0], mapped[1], tid))
                 n_tracks += 1
         for cid in self.unresolved_car_ids():
-            mapped = trackids.resolve_car_with(cid, user_names)
+            mapped = trackids.resolve_car_with(cid, user_names, official)
             if mapped:
                 self.conn.execute(
                     "UPDATE entries SET vehicle = ? WHERE vehicle = ?",

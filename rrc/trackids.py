@@ -623,20 +623,120 @@ def save_user_names(path, data):
     os.replace(tmp, path)
 
 
-def resolve_layout_with(layout_id, user=None):
-    """Resolve a layout ID using user mappings first, then built-in tables.
-    Returns (track, layout) or None."""
+def resolve_layout_with(layout_id, user=None, official=None):
+    """Resolve a layout ID. Priority: user mappings, then the official
+    game data (r3e-data.json of the RaceRoom installation), then the
+    built-in tables. Returns (track, layout) or None."""
     if user:
         v = (user.get("layouts") or {}).get(str(layout_id))
+        if v:
+            return (v[0], v[1])
+    if official:
+        v = (official.get("layouts") or {}).get(_as_int(layout_id))
         if v:
             return (v[0], v[1])
     return resolve_layout(layout_id)
 
 
-def resolve_car_with(car_id, user=None):
-    """Resolve a car ID using user mappings first, then built-in tables."""
+def resolve_car_with(car_id, user=None, official=None):
+    """Resolve a car ID. Priority: user mappings, then the official game
+    data, then the built-in tables."""
     if user:
         v = (user.get("cars") or {}).get(str(car_id))
         if v:
             return v
+    if official:
+        v = (official.get("cars") or {}).get(_as_int(car_id))
+        if v:
+            return v
     return resolve_car(car_id)
+
+
+def _as_int(value):
+    try:
+        return int(value)
+    except (TypeError, ValueError):
+        return None
+
+
+def official_data_path(install_dir):
+    """Standard path of the official r3e-data.json inside a RaceRoom
+    installation folder."""
+    import os
+    return os.path.join(install_dir, "Game", "GameData", "General",
+                        "r3e-data.json")
+
+
+def find_official_data(install_dir):
+    """Locate r3e-data.json below the given RaceRoom folder.
+    Returns the full path or None if not present."""
+    import os
+    if not install_dir:
+        return None
+    candidates = [
+        official_data_path(install_dir),
+        os.path.join(install_dir, "GameData", "General", "r3e-data.json"),
+        os.path.join(install_dir, "r3e-data.json"),
+    ]
+    for c in candidates:
+        if os.path.isfile(c):
+            return c
+    return None
+
+
+def load_official(install_dir):
+    """Load ID tables from the official r3e-data.json shipped with the
+    game (kept current by every game update). Returns
+    {"layouts": {id: (track, layout)}, "cars": {id: name}} or None if
+    the folder is invalid or the file unreadable. Supports both the
+    game schema (tracks with nested layouts) and the flat community
+    schema (top-level "layouts" with TrackId references)."""
+    import json
+    path = find_official_data(install_dir)
+    if not path:
+        return None
+    try:
+        with open(path, "r", encoding="utf-8") as f:
+            data = json.load(f)
+    except (OSError, ValueError):
+        return None
+    if not isinstance(data, dict):
+        return None
+    layouts = {}
+    cars = {}
+    track_names = {}
+    for tid, t in (data.get("tracks") or {}).items():
+        if not isinstance(t, dict):
+            continue
+        name = t.get("Name") or t.get("name") or ""
+        if name:
+            track_names[str(tid)] = str(name)
+        for lay in t.get("layouts") or []:
+            if isinstance(lay, dict) and lay.get("Id") is not None:
+                lid = _as_int(lay.get("Id"))
+                if lid is not None:
+                    layouts[lid] = (str(name), str(lay.get("Name") or ""))
+    # Community (overlay) schema fallback: flat layout table
+    for lid, lay in (data.get("layouts") or {}).items():
+        if not isinstance(lay, dict):
+            continue
+        key = _as_int(lid)
+        if key is None or key in layouts:
+            continue
+        tname = track_names.get(str(lay.get("TrackId") or ""), "")
+        layouts[key] = (tname, str(lay.get("Name") or ""))
+    for cid, c in (data.get("cars") or {}).items():
+        if isinstance(c, dict):
+            name = c.get("Name") or c.get("name")
+            if not name:
+                continue
+            key = _as_int(cid)
+            if key is not None:
+                cars[key] = str(name)
+        elif isinstance(c, str) and c:
+            key = _as_int(cid)
+            if key is not None:
+                cars[key] = c
+    if not layouts and not cars:
+        return None
+    return {"layouts": layouts, "cars": cars}
