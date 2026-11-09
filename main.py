@@ -349,6 +349,7 @@ class MainWindow(QtWidgets.QMainWindow):
         if install_dir:
             self.official = trackids.load_official(install_dir)
         self.db.upgrade_ids(self.user_names, self.official)
+        self.db.sanitize_laps()
 
         self.tabs = QtWidgets.QTabWidget()
         self.setCentralWidget(self.tabs)

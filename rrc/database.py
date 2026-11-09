@@ -164,6 +164,19 @@ class Database:
         self.conn.commit()
         return n_tracks, n_vehicles
 
+    def sanitize_laps(self, threshold=500):
+        """Bereinigt den KI-Artefakt in totalLaps (immer 856, ohne eine
+        einzige gueltige Rundenzeit): Eintraege mit unrealistisch hoher
+        Rundenzahl erhalten die Anzahl tatsaechlich gezeichneter Runden
+        (Tabelle laps), sonst 0. Rueckgabe: Anzahl korrigierter Eintraege."""
+        cur = self.conn.execute(
+            "UPDATE entries SET laps = (SELECT COUNT(*) FROM laps l"
+            " WHERE l.entry_id = entries.id AND l.lap_time_ms > 0)"
+            " WHERE laps > ?", (threshold,))
+        n = max(cur.rowcount, 0)
+        self.conn.commit()
+        return n
+
     def sessions(self, limit=5000, search="", session_type="", driver="",
                  names=None, date_from="", date_to="", track="",
                  vehicle=""):

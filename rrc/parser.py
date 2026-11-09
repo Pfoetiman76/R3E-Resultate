@@ -135,18 +135,41 @@ def parse_sp_json(data: dict, filename: str = "") -> Session:
                                                  official)
             if resolved:
                 vehicle = resolved
+        # Runden (neueres SP-Format ab Spiel 0.9.9): 'laps'-Liste je Fahrer.
+        # KI-Fahrer enthaelt nur Platzhalter (lapTimeMs -1) sowie einen
+        # Artefakt-Wert in totalLaps (immer 856, unabhaengig vom Fahren);
+        # gezaehlt werden ausschliesslich Runden mit gueltiger Zeit.
+        laps_detail = []
+        for lp in d.get("laps") or []:
+            if not isinstance(lp, dict):
+                continue
+            lt = _ms(_first(lp, "lapTimeMs", "lapTimems", "laptime",
+                            default=0))
+            if lt > 0:
+                laps_detail.append(
+                    LapEntry(_ms(_first(lp, "number", default=0)), lt, []))
+        total_laps = _ms(_first(d, "totallaps", "totalLaps", "laps",
+                                default=0))
+        if laps_detail:
+            laps = len(laps_detail)
+        elif total_laps > 500:
+            # KI-Artefakt (856) ohne eine einzige gueltige Rundenzeit
+            laps = 0
+        else:
+            laps = max(total_laps, 0)
         sess.players.append(PlayerResult(
             name=str(name),
             vehicle=vehicle,
             team=str(_first(d, "team", default="") or ""),
             position=_ms(_first(d, "place", "position", default=0)),
-            laps=_ms(_first(d, "totallaps", "totalLaps", "laps", default=0)),
+            laps=laps,
             best_lap_ms=_ms(_first(d, "bestlaptimems", "bestLapTimeMs",
                                    "bestlap", "bestLapTime", default=0)),
             qual_ms=_ms(_first(d, "qualtimems", "qualTimeMs", default=0)),
             race_time_ms=_ms(_first(d, "racetimems", "raceTimeMs",
                                     "totalTime", default=0)),
             finish_status=str(_first(d, "finishStatus", default="") or ""),
+            laps_detail=laps_detail,
         ))
     sess.digest = make_digest(sess, filename)
     return sess
