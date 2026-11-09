@@ -22,6 +22,7 @@ exe = EXE(
     [],
     exclude_binaries=True,
     name="R3EResultate",
+    icon="../rrc/app_icon.ico",
     debug=False,
     bootloader_ignore_signals=False,
     strip=False,

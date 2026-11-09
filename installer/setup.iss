@@ -18,6 +18,7 @@ DefaultGroupName={#AppName}
 UninstallDisplayName={#AppName} {#AppVer}
 OutputDir=Output
 OutputBaseFilename=R3E-Resultate-Setup-{#AppVer}
+SetupIconFile=..\rrc\app_icon.ico
 Compression=lzma2
 SolidCompression=yes
 ArchitecturesInstallIn64BitMode=x64compatible

@@ -282,3 +282,54 @@ class TestIdUpgrade(unittest.TestCase):
         self.assertEqual(entries[0]["vehicle"], "Testwagen GT")
         self.assertEqual(db.unresolved_track_ids(), [])
         db.close()
+
+
+class TestSessionFilters(unittest.TestCase):
+    """0.4.5: erweiterte Filter Datum von/bis, Strecke, Fahrzeug."""
+
+    def setUp(self):
+        import tempfile
+        from rrc.models import Session, PlayerResult
+        self.tmp = tempfile.TemporaryDirectory()
+        self.db = Database(os.path.join(self.tmp.name, "results.db"))
+        for i, (ts, track, veh) in enumerate([
+                ("2023-06-01 10:00:00", "Sachsenring", "Audi R8 LMS GT3"),
+                ("2023-06-15 10:00:00", "Sachsenring", "BMW M4 GT3"),
+                ("2023-07-01 10:00:00", "Nordschleife", "Audi R8 LMS GT3")]):
+            s = Session(session_type="Race", timestamp=ts, track=track,
+                        layout="", source_file=f"f{i}.txt", digest=f"d-f{i}")
+            s.players.append(PlayerResult(name="Marcel Wijnandts", vehicle=veh,
+                                           best_lap_ms=80000 + i))
+            self.db.insert_session(s, f"f{i}.txt")
+
+    def tearDown(self):
+        self.db.close()
+        self.tmp.cleanup()
+
+    def test_date_range(self):
+        rows = self.db.sessions(date_from="2023-06-05", date_to="2023-06-30")
+        self.assertEqual(len(rows), 1)
+        self.assertEqual(rows[0]["track"], "Sachsenring")
+
+    def test_date_from_only(self):
+        rows = self.db.sessions(date_from="2023-06-16")
+        self.assertEqual(len(rows), 1)
+        self.assertEqual(rows[0]["track"], "Nordschleife")
+
+    def test_track_filter(self):
+        rows = self.db.sessions(track="Sachsenring")
+        self.assertEqual(len(rows), 2)
+
+    def test_vehicle_filter(self):
+        rows = self.db.sessions(vehicle="BMW M4 GT3")
+        self.assertEqual(len(rows), 1)
+        self.assertEqual(rows[0]["timestamp"], "2023-06-15 10:00:00")
+
+    def test_combined_filters(self):
+        rows = self.db.sessions(track="Sachsenring", vehicle="Audi R8 LMS GT3")
+        self.assertEqual(len(rows), 1)
+        self.assertEqual(rows[0]["timestamp"], "2023-06-01 10:00:00")
+
+    def test_vehicles_listing(self):
+        self.assertEqual(self.db.vehicles(),
+                         ["Audi R8 LMS GT3", "BMW M4 GT3"])

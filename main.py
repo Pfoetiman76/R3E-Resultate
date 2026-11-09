@@ -23,6 +23,7 @@ import updater
 from rrc import fuelcalc
 from rrc import appsettings
 from rrc import trackids
+from rrc import icon_gen
 from rrc.charts import LineChartWidget
 from rrc.database import Database
 from rrc.models import APP_NAME, APP_VERSION, delta_class, format_time_ms
@@ -410,6 +411,39 @@ class MainWindow(QtWidgets.QMainWindow):
         filt.addWidget(self.chk_hide_ai)
         v.addLayout(filt)
 
+        # Zweite Filterzeile (0.4.5): Datum von/bis, Strecke, Fahrzeug
+        filt2 = QtWidgets.QHBoxLayout()
+        self.chk_date = QtWidgets.QCheckBox("Datum:")
+        self.chk_date.toggled.connect(self.refresh_sessions)
+        filt2.addWidget(self.chk_date)
+        self.dte_from = QtWidgets.QDateEdit(QtCore.QDate.currentDate())
+        self.dte_from.setCalendarPopup(True)
+        self.dte_from.setDisplayFormat("dd.MM.yyyy")
+        self.dte_from.setEnabled(False)
+        self.dte_from.dateChanged.connect(self.refresh_sessions)
+        filt2.addWidget(self.dte_from)
+        filt2.addWidget(QtWidgets.QLabel("bis"))
+        self.dte_to = QtWidgets.QDateEdit(QtCore.QDate.currentDate())
+        self.dte_to.setCalendarPopup(True)
+        self.dte_to.setDisplayFormat("dd.MM.yyyy")
+        self.dte_to.setEnabled(False)
+        self.dte_to.dateChanged.connect(self.refresh_sessions)
+        filt2.addWidget(self.dte_to)
+        self.chk_date.toggled.connect(self._toggle_date_filter)
+        filt2.addSpacing(12)
+        filt2.addWidget(QtWidgets.QLabel("Strecke:"))
+        self.cmb_track_filter = QtWidgets.QComboBox()
+        self.cmb_track_filter.setMinimumWidth(170)
+        self.cmb_track_filter.currentTextChanged.connect(self.refresh_sessions)
+        filt2.addWidget(self.cmb_track_filter)
+        filt2.addWidget(QtWidgets.QLabel("Fahrzeug:"))
+        self.cmb_vehicle_filter = QtWidgets.QComboBox()
+        self.cmb_vehicle_filter.setMinimumWidth(170)
+        self.cmb_vehicle_filter.currentTextChanged.connect(self.refresh_sessions)
+        filt2.addWidget(self.cmb_vehicle_filter)
+        filt2.addStretch(1)
+        v.addLayout(filt2)
+
         self.tbl_sessions = QtWidgets.QTableView()
         self.tbl_sessions.setAlternatingRowColors(False)
         self.sess_model = SessionTableModel([])
@@ -654,6 +688,7 @@ class MainWindow(QtWidgets.QMainWindow):
         self._reload_lap_sessions()
         self.on_driver_changed_full(self.cmb_driver.currentText())
         self._reload_tracks()
+        self._reload_filter_combos()
 
     def _driver_names(self):
         return self.db.drivers(names=self._name_filter())
@@ -676,9 +711,39 @@ class MainWindow(QtWidgets.QMainWindow):
         type_ = "" if type_sel in ("", "Alle") else type_sel
         driver = self.cmb_driver_sessions.currentText()
         driver = "" if driver.startswith("(") else driver
+        date_from = date_to = ""
+        if self.chk_date.isChecked():
+            date_from = self.dte_from.date().toString("yyyy-MM-dd")
+            date_to = self.dte_to.date().toString("yyyy-MM-dd")
+        track = self.cmb_track_filter.currentText()
+        track = "" if track.startswith("(") else track
+        vehicle = self.cmb_vehicle_filter.currentText()
+        vehicle = "" if vehicle.startswith("(") else vehicle
         rows = self.db.sessions(search=search, session_type=type_, driver=driver,
-                                names=self._name_filter())
+                                names=self._name_filter(), date_from=date_from,
+                                date_to=date_to, track=track, vehicle=vehicle)
         self.sess_model.set_rows(rows)
+
+    def _toggle_date_filter(self, checked):
+        self.dte_from.setEnabled(checked)
+        self.dte_to.setEnabled(checked)
+
+    def _reload_filter_combos(self):
+        """Strecken-/Fahrzeug-Filter neu laden, Auswahl möglichst behalten."""
+        seen = []
+        for r in self.db.tracks():
+            if r["track"] and r["track"] not in seen:
+                seen.append(r["track"])
+        for combo, values in ((self.cmb_track_filter, seen),
+                              (self.cmb_vehicle_filter, self.db.vehicles())):
+            prev = combo.currentText()
+            combo.blockSignals(True)
+            combo.clear()
+            combo.addItem("(alle Strecken)" if combo is self.cmb_track_filter
+                          else "(alle Fahrzeuge)")
+            combo.addItems(values)
+            combo.setCurrentIndex(max(0, combo.findText(prev)) if prev else 0)
+            combo.blockSignals(False)
 
     def _session_label(self, r):
         full = r["track"] + ((" - " + r["layout"]) if r["layout"] else "")
@@ -1145,10 +1210,24 @@ class MainWindow(QtWidgets.QMainWindow):
         super().closeEvent(ev)
 
 
+def _ensure_app_icon():
+    """Erzeugt das App-Icon beim ersten Start im App-Datenordner (0.4.5)."""
+    icon_path = os.path.join(default_app_dir(), "app_icon.ico")
+    try:
+        if not os.path.exists(icon_path):
+            icon_gen.write_ico(icon_path)
+        return icon_path
+    except OSError:
+        return None
+
+
 def main():
     app = QtWidgets.QApplication(sys.argv)
     app.setApplicationName(APP_NAME)
     app.setApplicationVersion(APP_VERSION)
+    icon_path = _ensure_app_icon()
+    if icon_path:
+        app.setWindowIcon(QtGui.QIcon(icon_path))
     apply_dark_theme(app)
     win = MainWindow()
     win.show()
