@@ -47,7 +47,7 @@ class TestSpCarAi(unittest.TestCase):
         return sess[0]
 
     def test_version(self):
-        self.assertEqual(APP_VERSION, "0.4.13")
+        self.assertEqual(APP_VERSION, "0.4.14")
 
     def test_car_id_and_ai_parsed(self):
         s = self._ingest("2026_11_07_20_44_53_Practice.txt",
