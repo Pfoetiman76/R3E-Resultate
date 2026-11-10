@@ -25,7 +25,10 @@ CREATE TABLE IF NOT EXISTS entries (
     best_lap_ms INTEGER DEFAULT 0,
     qual_ms INTEGER DEFAULT 0,
     race_time_ms INTEGER DEFAULT 0,
-    finish_status TEXT DEFAULT ''
+    finish_status TEXT DEFAULT '',
+    car_id INTEGER DEFAULT 0,
+    ai INTEGER DEFAULT -1,
+    vehicle_class TEXT DEFAULT ''
 );
 CREATE TABLE IF NOT EXISTS laps (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -45,16 +48,35 @@ CREATE INDEX IF NOT EXISTS idx_laps_entry ON laps(entry_id);
 # Session types that count as "race" for statistics.
 _RACE_LIKE = "Race"
 
+# Bedingung: kein als KI erkannter Fahrer (0.4.10). ai = -1/NULL bedeutet
+# "unbekannt" (Server-/Multiplayer-Formate) und bleibt sichtbar.
+_AI_HIDE = "({p}ai IS NULL OR {p}ai <= 0) "
+
 
 class Database:
     def __init__(self, path: str):
         os.makedirs(os.path.dirname(os.path.abspath(path)) or ".", exist_ok=True)
         self.path = path
+        self.hide_ai = False   # KI-Fahrer ausblenden (Haken in der Sitzungsliste)
         self.conn = sqlite3.connect(path)
         self.conn.row_factory = sqlite3.Row
         self.conn.executescript(_SCHEMA)
         self.conn.execute("PRAGMA foreign_keys = ON")
+        self._migrate_entries()
         self.conn.commit()
+
+    def _migrate_entries(self):
+        """Spalten nachruesten, die mit 0.4.10 dazukamen (car_id, ai,
+        vehicle_class) — aeltere Datenbanken bleiben ohne Datenverlust
+        nutzbar."""
+        cols = {r[1] for r in
+                self.conn.execute("PRAGMA table_info(entries)").fetchall()}
+        for col, decl in (("car_id", "INTEGER DEFAULT 0"),
+                          ("ai", "INTEGER DEFAULT -1"),
+                          ("vehicle_class", "TEXT DEFAULT ''")):
+            if col not in cols:
+                self.conn.execute(
+                    f"ALTER TABLE entries ADD COLUMN {col} {decl}")
 
     def close(self):
         self.conn.close()
@@ -104,10 +126,13 @@ class Database:
             for p in sess.players:
                 ecur = self.conn.execute(
                     "INSERT INTO entries (session_id, position, name, vehicle, team,"
-                    " laps, best_lap_ms, qual_ms, race_time_ms, finish_status)"
-                    " VALUES (?,?,?,?,?,?,?,?,?,?)",
+                    " laps, best_lap_ms, qual_ms, race_time_ms, finish_status,"
+                    " car_id, ai, vehicle_class)"
+                    " VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)",
                     (sess_id, p.position, p.name, p.vehicle, p.team, p.laps,
-                     p.best_lap_ms, p.qual_ms, p.race_time_ms, p.finish_status))
+                     p.best_lap_ms, p.qual_ms, p.race_time_ms, p.finish_status,
+                     getattr(p, "car_id", 0), getattr(p, "is_ai", -1),
+                     getattr(p, "vehicle_class", "")))
                 if p.laps_detail:
                     self.conn.executemany(
                         "INSERT INTO laps (entry_id, lap_no, lap_time_ms,"
@@ -177,6 +202,50 @@ class Database:
         self.conn.commit()
         return n
 
+    def backfill_from_files(self, folder):
+        """Ab 0.4.10: Bereits gespeicherte Sitzungen nachtraeglich um
+        Fahrzeug, carId, KI-Kennzeichen und Fahrzeugklasse ergaenzen.
+        Sitzungen, deren Eintraege (noch) ohne Fahrzeug gespeichert wurden
+        (Einzelspieler-Dateien bis 0.4.9), werden aus den Originaldateien
+        im Ergebnisordner neu gelesen und die Felder nachgetragen.
+        Rueckgabe: Anzahl aktualisierter Eintraege."""
+        import os
+        if not folder or not os.path.isdir(folder):
+            return 0
+        from .parser import parse_file
+        rows = self.conn.execute(
+            "SELECT DISTINCT s.id, s.source_file FROM sessions s "
+            "JOIN entries e ON e.session_id = s.id "
+            "WHERE e.vehicle = ''").fetchall()
+        n = 0
+        for r in rows:
+            path = os.path.join(folder, r["source_file"] or "")
+            if not r["source_file"] or not os.path.isfile(path):
+                continue
+            for sess in parse_file(path):
+                by_name = {}
+                for p in sess.players:
+                    prev = by_name.get(p.name)
+                    if prev is None or p.vehicle:
+                        by_name[p.name] = p
+                updates = 0
+                for e in self.conn.execute(
+                        "SELECT id, name FROM entries WHERE session_id = ?",
+                        (r["id"],)).fetchall():
+                    p = by_name.get(e["name"])
+                    if p is None:
+                        continue
+                    self.conn.execute(
+                        "UPDATE entries SET vehicle = ?, car_id = ?, ai = ?, "
+                        "vehicle_class = ? WHERE id = ?",
+                        (p.vehicle, getattr(p, "car_id", 0),
+                         getattr(p, "is_ai", -1),
+                         getattr(p, "vehicle_class", ""), e["id"]))
+                    updates += 1
+                n += updates
+        self.conn.commit()
+        return n
+
     def sessions(self, limit=5000, search="", session_type="", driver="",
                  names=None, date_from="", date_to="", track="",
                  vehicle=""):
@@ -191,9 +260,14 @@ class Database:
         if names is not None and not names:
             return []
         q = ("SELECT s.*, COUNT(e.id) AS n_players, "
-             "MIN(e.best_lap_ms) AS session_best_ms "
+             "MIN(CASE WHEN e.best_lap_ms > 0 THEN e.best_lap_ms END) "
+             "  AS session_best_ms, "
+             "GROUP_CONCAT(DISTINCT CASE WHEN e.vehicle != '' "
+             "  THEN e.vehicle END) AS vehicles "
              "FROM sessions s LEFT JOIN entries e ON e.session_id = s.id ")
         jparams = []
+        if self.hide_ai:
+            q += "AND " + _AI_HIDE.format(p="e.")
         if names is not None:
             q += "AND e.name IN (" + ",".join("?" * len(names)) + ") "
             jparams = list(names)
@@ -224,8 +298,8 @@ class Database:
         if where:
             q += "WHERE " + " AND ".join(where) + " "
         q += ("GROUP BY s.id")
-        if names is not None:
-            q += " HAVING COUNT(e.id) > 0"   # Sitzungen ohne echte Fahrer weg
+        if names is not None or self.hide_ai:
+            q += " HAVING COUNT(e.id) > 0"   # Sitzungen ohne sichtbare Fahrer weg
         q += (" ORDER BY s.timestamp DESC LIMIT ?")
         return self.conn.execute(q, jparams + params + [limit]).fetchall()
 
@@ -233,6 +307,8 @@ class Database:
         """Entries of a session; names wie bei sessions() (KI-Ausblendung)."""
         q = "SELECT * FROM entries WHERE session_id = ? "
         params = [session_id]
+        if self.hide_ai:
+            q += "AND " + _AI_HIDE.format(p="")
         if names is not None:
             if names:
                 q += "AND name IN (" + ",".join("?" * len(names)) + ") "
@@ -259,12 +335,14 @@ class Database:
     def personal_bests(self, driver: str = "", names=None):
         """Best lap per track/layout/vehicle. driver empty = all drivers.
         names wie bei sessions() (KI-Ausblendung)."""
-        q = ("SELECT e.name, s.track, s.layout, e.vehicle, "
+        q = ("SELECT e.name, s.track, s.layout, e.vehicle, e.vehicle_class, "
              "MIN(e.best_lap_ms) AS best_ms, COUNT(*) AS n, "
              "MAX(s.timestamp) AS last_seen "
              "FROM entries e JOIN sessions s ON s.id = e.session_id "
              "WHERE e.best_lap_ms > 0 ")
         params = []
+        if self.hide_ai:
+            q += "AND " + _AI_HIDE.format(p="e.")
         if names is not None:
             if names:
                 q += "AND e.name IN (" + ",".join("?" * len(names)) + ") "
@@ -282,6 +360,8 @@ class Database:
         """Distinct driver names; names-Filter fuer die KI-Ausblendung."""
         q = "SELECT DISTINCT name FROM entries WHERE name != '' "
         params = []
+        if self.hide_ai:
+            q += "AND " + _AI_HIDE.format(p="")
         if names is not None:
             if names:
                 q += "AND name IN (" + ",".join("?" * len(names)) + ") "
@@ -299,17 +379,23 @@ class Database:
 
     def vehicles_for_track(self, track):
         """Distinct vehicles driven on a track (for the fuel calculator)."""
+        cond = "s.track = ? AND e.vehicle != '' "
+        params = [track]
+        if self.hide_ai:
+            cond += "AND " + _AI_HIDE.format(p="e.")
         return [r["vehicle"] for r in self.conn.execute(
             "SELECT DISTINCT e.vehicle FROM entries e "
             "JOIN sessions s ON s.id = e.session_id "
-            "WHERE s.track = ? AND e.vehicle != '' ORDER BY e.vehicle",
-            (track,))]
+            "WHERE " + cond + "ORDER BY e.vehicle", params)]
 
     def vehicles(self):
         """Distinct vehicle names in entries (for the filter combo)."""
+        cond = "vehicle != '' "
+        if self.hide_ai:
+            cond += "AND " + _AI_HIDE.format(p="")
         rows = self.conn.execute(
-            "SELECT DISTINCT vehicle FROM entries "
-            "WHERE vehicle != '' ORDER BY vehicle").fetchall()
+            "SELECT DISTINCT vehicle FROM entries WHERE " + cond +
+            "ORDER BY vehicle").fetchall()
         return [r["vehicle"] for r in rows]
 
     def progression(self, track, layout="", vehicle="", driver=""):
@@ -318,6 +404,8 @@ class Database:
              "FROM entries e JOIN sessions s ON s.id = e.session_id "
              "WHERE s.track = ? AND e.best_lap_ms > 0 ")
         params = [track]
+        if self.hide_ai:
+            q += "AND " + _AI_HIDE.format(p="e.")
         if layout:
             q += "AND s.layout = ? "
             params.append(layout)
@@ -334,6 +422,8 @@ class Database:
         """Gemeinsame WHERE-Bausteine für die Statistik zurück."""
         base = "FROM entries e JOIN sessions s ON s.id = e.session_id "
         conds, params = [], []
+        if self.hide_ai:
+            conds.append(_AI_HIDE.format(p="e.").strip())
         if driver:
             conds.append("e.name = ?")
             params.append(driver)
@@ -360,7 +450,8 @@ class Database:
         race = "AND s.session_type LIKE 'Race%' "
         row = self.conn.execute(
             f"SELECT COUNT(DISTINCT s.id) AS sessions, COUNT(e.id) AS entries, "
-            f"MIN(e.best_lap_ms) AS best_ms, SUM(e.laps) AS total_laps {base} "
+            f"MIN(CASE WHEN e.best_lap_ms > 0 THEN e.best_lap_ms END) "
+            f"  AS best_ms, SUM(e.laps) AS total_laps {base} "
             f"WHERE 1=1 {cond}", params).fetchone()
         wins = self.conn.execute(
             f"SELECT COUNT(*) AS wins {base} "
@@ -400,9 +491,14 @@ class Database:
         if by == "track":
             label = ("s.track || CASE WHEN s.layout != '' AND s.layout != "
                       "'(Layout-Id)' THEN ' - ' || s.layout ELSE '' END")
+        elif by == "class":
+            label = ("CASE WHEN e.vehicle_class != '' THEN e.vehicle_class "
+                     "ELSE '(ohne Klasse)' END")
         else:
             label = "e.vehicle"
         conds, params = [], []
+        if self.hide_ai:
+            conds.append(_AI_HIDE.format(p="e.").strip())
         if driver:
             conds.append("e.name = ?")
             params.append(driver)
@@ -463,6 +559,8 @@ class Database:
              "FROM entries e JOIN sessions s ON s.id = e.session_id "
              "WHERE s.session_type LIKE 'Race%' ")
         params = []
+        if self.hide_ai:
+            q += "AND " + _AI_HIDE.format(p="e.")
         if driver:
             q += "AND e.name = ? "
             params.append(driver)
@@ -486,6 +584,8 @@ class Database:
              "AND ((e.finish_status != '' AND LOWER(e.finish_status) != 'finished') "
              "     OR e.position = 0) ")
         params = []
+        if self.hide_ai:
+            q += "AND " + _AI_HIDE.format(p="e.")
         if driver:
             q += "AND e.name = ? "
             params.append(driver)
@@ -495,22 +595,43 @@ class Database:
     def totals(self):
         """Gesamtzaehler fuer die Statusleiste: (Sitzungen, Runden gesamt)."""
         n_s = self.conn.execute("SELECT COUNT(*) FROM sessions").fetchone()[0]
+        cond = ("WHERE " + _AI_HIDE.format(p="")) if self.hide_ai else ""
         n_l = self.conn.execute(
-            "SELECT COALESCE(SUM(laps), 0) FROM entries").fetchone()[0]
+            f"SELECT COALESCE(SUM(laps), 0) FROM entries {cond}").fetchone()[0]
         return n_s, n_l
 
     # ------------------------------------------------ 0.4.1 Streckenrekorde --
 
-    def track_records(self, track, layout=""):
+    def track_classes(self, track, layout=""):
+        """Fahrzeugklassen, die auf einer Strecke gefahren wurden
+        (0.4.10, fuer die Rekord-Kacheln je Klasse)."""
+        q = ("SELECT DISTINCT e.vehicle_class FROM entries e "
+             "JOIN sessions s ON s.id = e.session_id "
+             "WHERE s.track = ? AND e.vehicle_class != '' ")
+        params = [track]
+        if layout:
+            q += "AND s.layout = ? "
+            params.append(layout)
+        if self.hide_ai:
+            q += "AND " + _AI_HIDE.format(p="e.")
+        q += "ORDER BY e.vehicle_class"
+        return [r["vehicle_class"] for r in self.conn.execute(q, params)]
+
+    def track_records(self, track, layout="", vehicle_class=""):
         """Streckenrekorde fuer den Runden-Tab (ueber alle Sitzungen).
 
         Bevorzugt echte Runden aus der laps-Tabelle; je Sitzungstyp
         Rueckfall auf die besten Runden (best_lap_ms). optimal_ms ist die
         theoretische Bestzeit aus den besten Einzelsektoren; None, wenn
         keine vollstaendigen Sektorenzeiten vorliegen.
-        """
-        filt = "s.track = ?" + (" AND s.layout = ?" if layout else "")
+        vehicle_class beschraenkt die Rekordberechnung auf eine Klasse
+        (mehrere Klassen = je Klasse eigene Rekorde)."""
+        filt = ("s.track = ?" + (" AND s.layout = ?" if layout else "")
+                + (" AND " + _AI_HIDE.format(p="e.") if self.hide_ai else ""))
         params = [track] + ([layout] if layout else [])
+        if vehicle_class:
+            filt += "AND e.vehicle_class = ? "
+            params.append(vehicle_class)
 
         def best_lap_of_type(type_like):
             q = ("SELECT MIN(l.lap_time_ms) FROM laps l "

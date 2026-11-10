@@ -129,12 +129,29 @@ def parse_sp_json(data: dict, filename: str = "") -> Session:
         name = _first(d, "name", default="")
         if not name:
             continue
-        vehicle = str(_first(d, "vehicle", "car", default="") or "")
-        if trackids.is_id(vehicle):
-            resolved = trackids.resolve_car_with(vehicle, user_names,
+        # Fahrzeug: SP-Ergebnisse nennen das Fahrzeug nur als interne
+        # Nummer (carId); aeltere/community-Formate auch als Textfeld.
+        car_id = _ms(_first(d, "carId", "carid", "carid", default=0))
+        vehicle = str(_first(d, "vehicle", "car", "carId", "carid",
+                             default="") or "")
+        if not car_id and trackids.is_id(vehicle):
+            car_id = _ms(vehicle)
+        if car_id:
+            resolved = trackids.resolve_car_with(car_id, user_names,
                                                  official)
             if resolved:
                 vehicle = resolved
+        vehicle_class = (trackids.resolve_car_class(car_id, official)
+                         if car_id else "")
+        # KI-Fahrer: das SP-Format kennzeichnet sie mit userId -1
+        uid = _first(d, "userId", "userid", default=None)
+        if uid is None:
+            is_ai = -1
+        else:
+            try:
+                is_ai = 1 if int(uid) < 1 else 0
+            except (TypeError, ValueError):
+                is_ai = -1
         # Runden (neueres SP-Format ab Spiel 0.9.9): 'laps'-Liste je Fahrer.
         # KI-Fahrer enthaelt nur Platzhalter (lapTimeMs -1) sowie einen
         # Artefakt-Wert in totalLaps (immer 856, unabhaengig vom Fahren);
@@ -170,6 +187,9 @@ def parse_sp_json(data: dict, filename: str = "") -> Session:
                                     "totalTime", default=0)),
             finish_status=str(_first(d, "finishStatus", default="") or ""),
             laps_detail=laps_detail,
+            car_id=car_id,
+            is_ai=is_ai,
+            vehicle_class=vehicle_class,
         ))
     sess.digest = make_digest(sess, filename)
     return sess

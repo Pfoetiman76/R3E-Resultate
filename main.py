@@ -30,9 +30,9 @@ from rrc.models import APP_NAME, APP_VERSION, delta_class, format_time_ms
 from rrc.paths import default_app_dir, default_results_dir, default_db_path
 from rrc.theme import apply_dark_theme
 
-COL_SESSIONS = ["Datum", "Typ", "Strecke", "Fahrer", "Bestzeit"]
+COL_SESSIONS = ["Datum", "Typ", "Strecke", "Fahrzeug", "Fahrer", "Bestzeit"]
 COL_ENTRIES = ["Pos.", "Fahrer", "Fahrzeug", "Runden", "Beste Runde", "Renzeit", "Status"]
-COL_BESTS = ["Fahrer", "Strecke", "Fahrzeug", "Bestzeit", "Fahrten", "Zuletzt"]
+COL_BESTS = ["Fahrer", "Strecke", "Klasse", "Fahrzeug", "Bestzeit", "Fahrten", "Zuletzt"]
 COL_LAPS = ["Runde", "Zeit", "Sektor 1", "Sektor 2", "Sektor 3",
             "Delta zur besten", "Delta Rekord"]
 COL_DNF = ["Fahrer", "Rennstarts", "DNF", "Zielquote %"]
@@ -101,7 +101,7 @@ class GenericTableModel(QtCore.QAbstractTableModel):
 
 class SessionTableModel(GenericTableModel):
     def __init__(self, rows):
-        super().__init__(COL_SESSIONS, [], mono_cols=(0, 3, 4))
+        super().__init__(COL_SESSIONS, [], mono_cols=(0, 4, 5))
         self.set_rows(rows)
 
     def set_rows(self, rows):
@@ -109,7 +109,8 @@ class SessionTableModel(GenericTableModel):
         for r in rows:
             full = r["track"] + ((" - " + r["layout"]) if r["layout"] else "")
             data.append([r["timestamp"], r["session_type"], full,
-                         r["n_players"], format_time_ms(r["session_best_ms"])])
+                         r["vehicles"] or "–", r["n_players"],
+                         format_time_ms(r["session_best_ms"])])
         self.beginResetModel()
         self.rows = data
         self.endResetModel()
@@ -352,6 +353,11 @@ class MainWindow(QtWidgets.QMainWindow):
             self.official = trackids.load_official(install_dir)
         self.db.upgrade_ids(self.user_names, self.official)
         self.db.sanitize_laps()
+        # 0.4.10: KI-Kennzeichen und Fahrzeugdaten aus den Originaldateien
+        # nachtragen (Sitzungen, die vor 0.4.10 ohne Fahrzeug gespeichert
+        # wurden) sowie Haken "KI-Fahrer ausblenden" an die Datenbank geben
+        self.db.backfill_from_files(self.results_dir)
+        self.db.hide_ai = bool(self.settings.get("hide_ai"))
 
         self.tabs = QtWidgets.QTabWidget()
         self.setCentralWidget(self.tabs)
@@ -508,29 +514,13 @@ class MainWindow(QtWidgets.QMainWindow):
         self.lbl_laps_hint.setObjectName("hint")
         v.addWidget(self.lbl_laps_hint)
 
-        # Rekord-Kacheln fuer die Strecke der gewaehlten Sitzung (0.4.1)
-        tiles = QtWidgets.QHBoxLayout()
+        # Rekord-Kacheln fuer die Strecke der gewaehlten Sitzung (0.4.1);
+        # ab 0.4.10 je Fahrzeugklasse eine eigene Kachelreihe
+        self.rec_tile_container = QtWidgets.QVBoxLayout()
+        v.addLayout(self.rec_tile_container)
         self.rec_tiles = {}
-        for key in ("Renn-Rekord", "Quali-Rekord", "Optimal-Runde", "Allzeit-Bestzeit"):
-            box = QtWidgets.QFrame()
-            box.setFixedHeight(64)
-            box.setStyleSheet(
-                "QFrame { background: #202027; border: 1px solid #33333d; }")
-            lay = QtWidgets.QVBoxLayout(box)
-            k = QtWidgets.QLabel(key)
-            k.setStyleSheet("color: #9a9aa4; font-size: 11px; font-weight: 700; "
-                             "background: transparent;")
-            val = QtWidgets.QLabel("–")
-            is_rec = key in ("Renn-Rekord", "Allzeit-Bestzeit")
-            val.setStyleSheet(
-                "color: %s; font-size: 17px; font-weight: 800; "
-                "background: transparent;" % ("#e8c34a" if is_rec else "#e8e8ec"))
-            lay.addWidget(k)
-            lay.addWidget(val)
-            tiles.addWidget(box)
-            self.rec_tiles[key] = val
-        tiles.addStretch(1)
-        v.addLayout(tiles)
+        self._class_tiles = {}
+        self._render_record_tiles([(None, self.db.track_records("", ""))])
 
         self.tbl_laps = QtWidgets.QTableView()
         self.tbl_laps.setAlternatingRowColors(False)
@@ -556,7 +546,7 @@ class MainWindow(QtWidgets.QMainWindow):
         v.addLayout(combo_row)
         self.tbl_bests = QtWidgets.QTableView()
         self.tbl_bests.setAlternatingRowColors(False)
-        self.bests_model = GenericTableModel(COL_BESTS, [], mono_cols=(3, 4, 5))
+        self.bests_model = GenericTableModel(COL_BESTS, [], mono_cols=(4, 5, 6))
         self.tbl_bests.setModel(self.bests_model)
         self.tbl_bests.horizontalHeader().setStretchLastSection(True)
         v.addWidget(self.tbl_bests, 1)
@@ -625,12 +615,14 @@ class MainWindow(QtWidgets.QMainWindow):
         row = QtWidgets.QHBoxLayout()
         row.addWidget(QtWidgets.QLabel("Gruppierung:"))
         self.cmb_aggr = QtWidgets.QComboBox()
-        self.cmb_aggr.addItems(["nach Strecke", "nach Fahrzeug"])
+        self.cmb_aggr.addItems(["nach Strecke", "nach Fahrzeug",
+                                "nach Fahrzeugklasse"])
         self.cmb_aggr.currentIndexChanged.connect(self.refresh_aggregate)
         row.addWidget(self.cmb_aggr)
         btn_details = QtWidgets.QPushButton("Details …")
         btn_details.clicked.connect(self.show_aggregate_details)
         row.addWidget(btn_details)
+        self.btn_aggr_details = btn_details
         btn_csv = QtWidgets.QPushButton("CSV-Export")
         btn_csv.clicked.connect(self.export_aggregate_csv)
         row.addWidget(btn_csv)
@@ -651,9 +643,12 @@ class MainWindow(QtWidgets.QMainWindow):
 
     def refresh_aggregate(self, *_):
         """Auswertungstabelle entsprechend der Gruppierung neu aufbauen."""
-        by = "track" if self.cmb_aggr.currentText() == "nach Strecke" else "vehicle"
+        text = self.cmb_aggr.currentText()
+        by = {"nach Strecke": "track",
+              "nach Fahrzeugklasse": "class"}.get(text, "vehicle")
         rows = self.db.aggregate(by, names=self._name_filter())
-        cols = (["Strecke"] if by == "track" else ["Fahrzeug"]) + COL_AGGR_NUM
+        cols = [{"track": "Strecke", "vehicle": "Fahrzeug",
+                 "class": "Klasse"}[by]] + COL_AGGR_NUM
         data = []
         for r in rows:
             data.append([
@@ -668,6 +663,8 @@ class MainWindow(QtWidgets.QMainWindow):
         self.aggr_model.endResetModel()
         self._aggr_raw = rows
         self._aggr_by = by
+        # "Details …" nur fuer Gruppierungen mit Sitzungs-Filter sinnvoll
+        self.btn_aggr_details.setEnabled(by in ("track", "vehicle"))
 
     def show_aggregate_details(self):
         """Gewaehlte Gruppe im Sitzungs-Reiter filtern."""
@@ -887,18 +884,88 @@ class MainWindow(QtWidgets.QMainWindow):
         self.cmb_lap_session.blockSignals(False)
         self.on_lap_session_changed()
 
+    def _render_record_tiles(self, entries):
+        """Rekord-Kacheln (0.4.10) neu aufbauen: je Eintrag
+        (Klassen-Caption oder None, rec-dict) eine Kachelreihe."""
+        def clear(layout):
+            while layout.count():
+                item = layout.takeAt(0)
+                w = item.widget()
+                if w is not None:
+                    w.deleteLater()
+                elif item.layout():
+                    clear(item.layout())
+
+        clear(self.rec_tile_container)
+        self.rec_tiles = {}
+        self._class_tiles = {}
+        for caption, rec in entries:
+            if caption:
+                lbl = QtWidgets.QLabel(f"Klasse: {caption}")
+                lbl.setStyleSheet(
+                    "color: #9a9aa4; font-size: 11px; font-weight: 700; "
+                    "background: transparent;")
+                self.rec_tile_container.addWidget(lbl)
+            row = QtWidgets.QHBoxLayout()
+            tiles = {}
+            for key in ("Renn-Rekord", "Quali-Rekord", "Optimal-Runde",
+                        "Allzeit-Bestzeit"):
+                box = QtWidgets.QFrame()
+                box.setFixedHeight(64)
+                box.setStyleSheet(
+                    "QFrame { background: #202027; "
+                    "border: 1px solid #33333d; }")
+                lay = QtWidgets.QVBoxLayout(box)
+                k = QtWidgets.QLabel(key)
+                k.setStyleSheet(
+                    "color: #9a9aa4; font-size: 11px; font-weight: 700; "
+                    "background: transparent;")
+                val = QtWidgets.QLabel("–")
+                is_rec = key in ("Renn-Rekord", "Allzeit-Bestzeit")
+                val.setStyleSheet(
+                    "color: %s; font-size: 17px; font-weight: 800; "
+                    "background: transparent;"
+                    % ("#e8c34a" if is_rec else "#e8e8ec"))
+                lay.addWidget(k)
+                lay.addWidget(val)
+                row.addWidget(box)
+                tiles[key] = val
+                if caption is None:
+                    self.rec_tiles[key] = val
+            row.addStretch(1)
+            self.rec_tile_container.addLayout(row)
+            self._class_tiles[caption] = tiles
+            field = {"Renn-Rekord": "race_ms", "Quali-Rekord": "qualify_ms",
+                     "Optimal-Runde": "optimal_ms",
+                     "Allzeit-Bestzeit": "best_ms"}
+            for key, val in tiles.items():
+                val.setText(format_time_ms(rec.get(field[key])) or "–")
+
     def on_lap_session_changed(self, *_):
         sid = self.cmb_lap_session.currentData()
-        # Rekord-Kacheln fuer die Strecke der gewaehlten Sitzung (0.4.1)
+        # Rekord-Kacheln fuer die Strecke der gewaehlten Sitzung (0.4.1);
+        # ab 0.4.10 je Fahrzeugklasse eine eigene Kachelreihe
         row = self._lap_session_rows.get(sid)
-        rec = (self.db.track_records(row["track"], row["layout"])
-               if row else {"race_ms": None, "qualify_ms": None,
-                            "best_ms": None, "optimal_ms": None})
-        self.rec_tiles["Renn-Rekord"].setText(format_time_ms(rec["race_ms"]) or "–")
-        self.rec_tiles["Quali-Rekord"].setText(format_time_ms(rec["qualify_ms"]) or "–")
-        self.rec_tiles["Optimal-Runde"].setText(format_time_ms(rec["optimal_ms"]) or "–")
-        self.rec_tiles["Allzeit-Bestzeit"].setText(format_time_ms(rec["best_ms"]) or "–")
-        self._lap_records = rec
+        if not row:
+            self._render_record_tiles([(
+                None, {"race_ms": None, "qualify_ms": None,
+                       "best_ms": None, "optimal_ms": None})])
+            self._lap_records = {}
+        else:
+            classes = self.db.track_classes(row["track"], row["layout"])
+            if len(classes) <= 1:
+                rec = self.db.track_records(row["track"], row["layout"])
+                self._render_record_tiles([(None, rec)])
+                self._lap_records = rec
+            else:
+                rows = []
+                for c in classes:
+                    rows.append((c, self.db.track_records(
+                        row["track"], row["layout"], c)))
+                self._render_record_tiles(rows)
+                # Deltas bleiben gegen den Strecken-Rekord aller Klassen
+                self._lap_records = self.db.track_records(
+                    row["track"], row["layout"])
 
         self.cmb_lap_driver.blockSignals(True)
         self.cmb_lap_driver.clear()
@@ -1024,7 +1091,8 @@ class MainWindow(QtWidgets.QMainWindow):
         rows = []
         for r in self.db.personal_bests(driver, names=self._name_filter()):
             rows.append([r["name"], (r["track"] + ((" - " + r["layout"]) if r["layout"] else "")),
-                         r["vehicle"], format_time_ms(r["best_ms"]), r["n"], r["last_seen"]])
+                         r["vehicle_class"] or "–", r["vehicle"],
+                         format_time_ms(r["best_ms"]), r["n"], r["last_seen"]])
         self.bests_model.beginResetModel()
         self.bests_model.rows = rows
         self.bests_model.endResetModel()
@@ -1090,10 +1158,14 @@ class MainWindow(QtWidgets.QMainWindow):
     # ----------------------------------------------- KI-Fahrer ausblenden --
 
     def _name_filter(self):
-        """None = alle Fahrer; sonst Liste echter Fahrer (leer = nichts)."""
+        """None = alle Fahrer; sonst Liste echter Fahrer (leer = nichts).
+
+        0.4.10: Ist der Haken gesetzt ohne gepflegte Liste, wird None
+        zurueckgegeben – als KI erkannte Fahrer blendet die Datenbank
+        dann automatisch aus (Kennzeichen aus der Ergebnisdatei)."""
         if not self.settings.get("hide_ai"):
             return None
-        return self.settings.get("real_drivers") or []
+        return self.settings.get("real_drivers") or None
 
     def _save_settings(self):
         try:
@@ -1105,18 +1177,26 @@ class MainWindow(QtWidgets.QMainWindow):
 
     def on_hide_ai_toggled(self, checked):
         self.settings["hide_ai"] = bool(checked)
+        self.db.hide_ai = bool(checked)
         self._save_settings()
         if checked and not self.settings.get("real_drivers"):
             QtWidgets.QMessageBox.information(
                 self, "KI-Fahrer ausblenden",
-                "Es sind noch keine echten Fahrer hinterlegt.\n"
-                "Bitte tragen Sie unter 'Werkzeuge → Echte Fahrer festlegen …' "
-                "ein, welche Fahrer angezeigt bleiben sollen.")
+                "KI-Fahrer in Einzelspieler-Ergebnissen werden automatisch "
+                "erkannt und ausgeblendet.\n\n"
+                "Die Liste unter 'Werkzeuge → Echte Fahrer festlegen …' wird "
+                "nur noch für Server- und Multiplayer-Ergebnisse benötigt, "
+                "in denen echte und simulierte Fahrer nicht unterscheidbar "
+                "sind.")
         # Alle von der Liste abhaengigen Ansichten neu aufbauen
         self._reload_driver_boxes()
         self.refresh_sessions()
         self._reload_lap_sessions()
         self.on_driver_changed(self.cmb_driver.currentText())
+        self.refresh_stats()
+        self.refresh_aggregate()
+        self.statusBar().showMessage(
+            "KI-Fahrer ausgeblendet" if checked else "Alle Fahrer angezeigt", 5000)
         self.statusBar().showMessage(
             "KI-Fahrer ausgeblendet" if checked else "Alle Fahrer angezeigt", 5000)
 
@@ -1137,6 +1217,8 @@ class MainWindow(QtWidgets.QMainWindow):
             self.refresh_sessions()
             self._reload_lap_sessions()
             self.on_driver_changed(self.cmb_driver.currentText())
+            self.refresh_stats()
+            self.refresh_aggregate()
         self.statusBar().showMessage(
             f"{len(names)} echte Fahrer gespeichert.", 5000)
 

@@ -652,6 +652,18 @@ def resolve_car_with(car_id, user=None, official=None):
     return resolve_car(car_id)
 
 
+def resolve_car_class(car_id, official=None):
+    """Vehicle class name for a car ID from the official game data
+    (r3e-data.json), e.g. 'GT3' or 'Mazda MX-5 Cup'. Empty string when
+    unknown (no installation folder set or ID not listed)."""
+    if not official:
+        return ""
+    try:
+        return (official.get("car_classes") or {}).get(int(car_id)) or ""
+    except (TypeError, ValueError):
+        return ""
+
+
 def _as_int(value):
     try:
         return int(value)
@@ -704,6 +716,14 @@ def load_official(install_dir):
         return None
     layouts = {}
     cars = {}
+    car_classes = {}
+    class_names = {}
+    for cid, c in (data.get("classes") or {}).items():
+        if isinstance(c, dict):
+            name = c.get("Name") or c.get("name")
+            key = _as_int(cid)
+            if name and key is not None:
+                class_names[key] = str(name)
     track_names = {}
     for tid, t in (data.get("tracks") or {}).items():
         if not isinstance(t, dict):
@@ -734,10 +754,13 @@ def load_official(install_dir):
             key = _as_int(cid)
             if key is not None:
                 cars[key] = str(name)
+                cls_key = _as_int(c.get("Class") or c.get("class"))
+                if cls_key is not None and cls_key in class_names:
+                    car_classes[key] = class_names[cls_key]
         elif isinstance(c, str) and c:
             key = _as_int(cid)
             if key is not None:
                 cars[key] = c
     if not layouts and not cars:
         return None
-    return {"layouts": layouts, "cars": cars}
+    return {"layouts": layouts, "cars": cars, "car_classes": car_classes}

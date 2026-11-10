@@ -1,6 +1,6 @@
 """RaceRoom Results Companion (RRC) - parsed result models."""
 APP_NAME = "RaceRoom Results Companion"
-APP_VERSION = "0.4.9"
+APP_VERSION = "0.4.10"
 
 from dataclasses import dataclass, field
 
@@ -25,6 +25,9 @@ class PlayerResult:
     race_time_ms: int = 0
     finish_status: str = ""
     laps_detail: list = field(default_factory=list)  # list[LapEntry]
+    car_id: int = 0            # internal RaceRoom car ID (SP results)
+    is_ai: int = -1            # -1 unknown, 0 human, 1 AI (SP: userId -1)
+    vehicle_class: str = ""    # e.g. 'GT3' (from official game data)
 
     @property
     def finished(self) -> bool:

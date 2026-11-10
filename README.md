@@ -3,7 +3,7 @@
 Eigenständige Begleit-App für **RaceRoom Racing Experience** – im Stil von „ACC Results Companion“:
 Sie liest die von RaceRoom erzeugten Ergebnisdateien automatisch ein und bietet eine dauerhafte Historie aller Sitzungen samt persönlichen Bestzeiten. Optik und Update-Mechanik folgen dem Vorbild von PitBoss R3E.
 
-## Funktionen (Version 0.4.9)
+## Funktionen (Version 0.4.10)
 
 - Überarbeitete Optik: kompakte Tabellen mit feinen Gitterlinien (keine Zebra-Streifen), Zeit- und Delta-Werte in technischer Schrift (Consolas), aktiver Reiter und Auswahl in RaceRoom-Rot, Rekordwerte gelb hervorgehoben, dauerhafte Statusanzeige (Sitzungen · Runden · Datenbank)
 - Automatische Überwachung des RaceRoom-Ergebnisordners (alle 5 Sekunden); neue Sitzungen erscheinen ohne Zutun
@@ -23,6 +23,7 @@ Sie liest die von RaceRoom erzeugten Ergebnisdateien automatisch ein und bietet 
 - Kraftstoffrechner („Werkzeuge → Kraftstoffrechner …“): Bedarfsprognose für Rennen nach Runden oder Minuten
 - Erweiterte Filter in der Sitzungsliste: Zeitraum (Datum von/bis mit Kalenderauswahl, aktivierbar über Haken), Strecke und Fahrzeug; kombinierbar mit Suche, Typ und Fahrer
 - Eigenes App-Symbol (Stoppuhr mit Schriftzug, freigegebene Kombination): Fenster- und Taskleistensymbol; der Installer nutzt es ebenfalls für Programm und Desktop-Verknüpfung
+- Fahrzeug- und Klassen-Anzeige plus KI-Erkennung (0.4.10): Einzelspieler-Ergebnisse nennen das Fahrzeug nur als interne Nummer — die App liest und übersetzt sie jetzt automatisch (auch für bereits gespeicherte Sitzungen, die beim Start aus den Originaldateien ergänzt werden). KI-Fahrer werden anhand des internen Kennzeichens in der Datei zuverlässig erkannt und mit dem Haken „KI-Fahrer ausblenden“ auch ohne gepflegte Fahrerliste ausgeblendet; Statistik, Sitzungsliste, Bestzeiten und Auswertung zeigen dann nur noch echte Fahrer. Neu: Spalte „Fahrzeug“ in der Sitzungsliste, Spalte „Klasse“ bei den Bestzeiten, Gruppierung „nach Fahrzeugklasse“ in der Auswertung und Rekord-Kacheln je Klasse im Runden-Tab (Klassennamen erfordern die hinterlegte RaceRoom-Installation, siehe 0.4.7). Korrigiert: Bestzeit je Sitzung und Allzeit-Bestzeit bleiben nicht mehr leer, wenn einzelne Fahrer keine gültige Zeit haben
 - Statistik-Aggregation (0.4.9): der neue Reiter „Auswertung“ fasst Ihre Historie wahlweise nach Strecke oder Fahrzeug zusammen — je Zeile Sitzungen, Rennen, Siege, Podium, Zielquote, Ø Bestzeit, Allzeit-Bestzeit, Runden und DNF; über „Details …“ springen Sie in die gefilterte Sitzungsliste, „CSV-Export“ sichert die Tabelle. Der KI-Fahrer-Filter wirkt auch hier
 - Korrigierte Rundenzählung (0.4.8): neuere Einzelspieler-Dateien liefern für KI-Fahrer einen fehlerhaften Platzhalter-Wert von stets 856 Runden ohne eine einzige gültige Rundenzeit — die Kachel „Runden gesamt“ zählte dadurch millionenfach zu hoch. Die App zählt nur Runden mit gültiger Zeit; bereits erfasste Sitzungen werden beim Start automatisch bereinigt. Gleichzeitig werden die enthaltenen Rundenzeiten neuer Einzelspieler-Dateien ausgewertet und im Runden-Tab angezeigt
 - Korrigierte Statistik (0.4.6): Zielquote berechnet sich als Ziele pro Renneinsatz (zuvor fälschlich pro Sitzung, was bei vielen Fahrern je Rennen Werte über 100 % lieferte); die KI-Fahrer-Ausblendung wirkt jetzt auch auf Statistik-Kacheln und DNF-Tabelle
@@ -86,7 +87,7 @@ Klick-Weg: GitHub → **Releases** → **Draft a new release** → Tag `v0.2.0` 
 | `installer/setup.iss` | Inno-Setup-Installer |
 | `installer/r3e_resultate.spec` | PyInstaller-Spezifikation |
 | `.github/workflows/release.yml` | CI: Tests → EXE → Installer → Release |
-| `tests/` | 94 Unit-Tests (Parser, Datenbank, Modelle, Einstellungen, Kraftstoff, Id-Auflösung, Icon, Statistik, Spieldatenbank, SP-Runden, Aggregation) |
+| `tests/` | 102 Unit-Tests (Parser, Datenbank, Modelle, Einstellungen, Kraftstoff, Id-Auflösung, Icon, Statistik, Spieldatenbank, SP-Runden, Aggregation, KI-Erkennung) |
 
 Tests ausführen: `python -m unittest discover -s tests`
 
