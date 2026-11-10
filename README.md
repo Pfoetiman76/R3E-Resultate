@@ -3,7 +3,7 @@
 Eigenständige Begleit-App für **RaceRoom Racing Experience** – im Stil von „ACC Results Companion“:
 Sie liest die von RaceRoom erzeugten Ergebnisdateien automatisch ein und bietet eine dauerhafte Historie aller Sitzungen samt persönlichen Bestzeiten. Optik und Update-Mechanik folgen dem Vorbild von PitBoss R3E.
 
-## Funktionen (Version 0.4.12)
+## Funktionen (Version 0.4.13)
 
 - Überarbeitete Optik: kompakte Tabellen mit feinen Gitterlinien (keine Zebra-Streifen), Zeit- und Delta-Werte in technischer Schrift (Consolas), aktiver Reiter und Auswahl in RaceRoom-Rot, Rekordwerte gelb hervorgehoben, dauerhafte Statusanzeige (Sitzungen · Runden · Datenbank)
 - Automatische Überwachung des RaceRoom-Ergebnisordners (alle 5 Sekunden); neue Sitzungen erscheinen ohne Zutun
@@ -23,6 +23,7 @@ Sie liest die von RaceRoom erzeugten Ergebnisdateien automatisch ein und bietet 
 - Kraftstoffrechner („Werkzeuge → Kraftstoffrechner …“): Bedarfsprognose für Rennen nach Runden oder Minuten
 - Erweiterte Filter in der Sitzungsliste: Zeitraum (Datum von/bis mit Kalenderauswahl, aktivierbar über Haken), Strecke und Fahrzeug; kombinierbar mit Suche, Typ und Fahrer
 - Eigenes App-Symbol (Stoppuhr mit Schriftzug, freigegebene Kombination): Fenster- und Taskleistensymbol; der Installer nutzt es ebenfalls für Programm und Desktop-Verknüpfung
+- Diagnose-Export (0.4.13): über „Werkzeuge → Diagnose exportieren …" wird ein Klartext-Bericht erzeugt, der je Strecke den Median aller Bestzeiten sowie die fünf schnellsten Bestzeiten und Runden mit Fahrer, Fahrzeug, Klasse, KI-Kennzeichnung und Quelldatei auflistet — die Grundlage für eine fundierte Ferndiagnose auffälliger Werte
 - Korrektur der Sitzungszahlen (0.4.12): verbesserte Strecken- und Fahrzeug-Übersetzungen zwischen App-Versionen hatten dazu geführt, dass bereits erfasste Sitzungen erneut gespeichert wurden — Sitzungen, Runden und Statistiken waren dadurch mehrfach gezählt (z. B. dreifache Sitzungszahl je Strecke). Beim Start werden solche Duplikate jetzt automatisch bereinigt (je Quelldatei, Typ und Zeit bleibt die vollständigste, neueste Sitzung) und künftig beim Einlesen zuverlässig verhindert; die Statusleiste meldet die Anzahl bereinigter Duplikate
 - Schneller Programmstart (0.4.11): bereits eingelesene, unveränderte Ergebnisdateien werden beim Start übersprungen (Lese-Cache über Dateigröße und Änderungszeitpunkt) — der Start bleibt auch bei hunderten Dateien augenblicklich; neue und geänderte Dateien werden wie gewohnt erkannt. Die Datenbank wartet bei kurzfristigen Sperren (Antivirus, Cloud-Sync, zweite App-Instanz) bis zu zehn Sekunden statt abzustürzen und arbeitet im WAL-Modus
 - Fahrzeug- und Klassen-Anzeige plus KI-Erkennung (0.4.10): Einzelspieler-Ergebnisse nennen das Fahrzeug nur als interne Nummer — die App liest und übersetzt sie jetzt automatisch (auch für bereits gespeicherte Sitzungen, die beim Start aus den Originaldateien ergänzt werden). KI-Fahrer werden anhand des internen Kennzeichens in der Datei zuverlässig erkannt und mit dem Haken „KI-Fahrer ausblenden“ auch ohne gepflegte Fahrerliste ausgeblendet; Statistik, Sitzungsliste, Bestzeiten und Auswertung zeigen dann nur noch echte Fahrer. Neu: Spalte „Fahrzeug“ in der Sitzungsliste, Spalte „Klasse“ bei den Bestzeiten, Gruppierung „nach Fahrzeugklasse“ in der Auswertung und Rekord-Kacheln je Klasse im Runden-Tab (Klassennamen erfordern die hinterlegte RaceRoom-Installation, siehe 0.4.7). Korrigiert: Bestzeit je Sitzung und Allzeit-Bestzeit bleiben nicht mehr leer, wenn einzelne Fahrer keine gültige Zeit haben
@@ -89,7 +90,7 @@ Klick-Weg: GitHub → **Releases** → **Draft a new release** → Tag `v0.2.0` 
 | `installer/setup.iss` | Inno-Setup-Installer |
 | `installer/r3e_resultate.spec` | PyInstaller-Spezifikation |
 | `.github/workflows/release.yml` | CI: Tests → EXE → Installer → Release |
-| `tests/` | 113 Unit-Tests (Parser, Datenbank, Modelle, Einstellungen, Kraftstoff, Id-Auflösung, Icon, Statistik, Spieldatenbank, SP-Runden, Aggregation, KI-Erkennung, Start-Cache, Duplikat-Bereinigung) |
+| `tests/` | 117 Unit-Tests (Parser, Datenbank, Modelle, Einstellungen, Kraftstoff, Id-Auflösung, Icon, Statistik, Spieldatenbank, SP-Runden, Aggregation, KI-Erkennung, Start-Cache, Duplikat-Bereinigung, Diagnose) |
 
 Tests ausführen: `python -m unittest discover -s tests`
 

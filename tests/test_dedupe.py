@@ -1,4 +1,4 @@
-"""Tests for 0.4.12: session dedupe and stable duplicate protection."""
+"""Tests for 0.4.13: session dedupe and stable duplicate protection."""
 import os
 import sys
 import tempfile
@@ -20,7 +20,7 @@ def _sess(digest, typ="Practice", ts="2026/11/07 20:44:54",
 
 
 class TestDedupe(unittest.TestCase):
-    """0.4.12: Duplikate durch geänderte Id-Auflösung."""
+    """0.4.13: Duplikate durch geänderte Id-Auflösung."""
 
     def setUp(self):
         self.tmp = tempfile.TemporaryDirectory()
@@ -31,10 +31,10 @@ class TestDedupe(unittest.TestCase):
         self.tmp.cleanup()
 
     def test_version(self):
-        self.assertEqual(APP_VERSION, "0.4.12")
+        self.assertEqual(APP_VERSION, "0.4.13")
 
     def _insert_raw(self, digest, track, layout, vehicle=""):
-        """Historischen Zustand direkt nachbilden (vor 0.4.12 konnten
+        """Historischen Zustand direkt nachbilden (vor 0.4.13 konnten
         Zeilen mit gleichem natuerlichem Schluessel mehrfach entstehen)."""
         cur = self.db.conn.execute(
             "INSERT INTO sessions (digest, session_type, timestamp, track, "

@@ -748,6 +748,9 @@ class MainWindow(QtWidgets.QMainWindow):
         act_r3e = QtGui.QAction("RaceRoom-Installation wählen …", self)
         act_r3e.triggered.connect(self.choose_raceroom_install)
         mw.addAction(act_r3e)
+        act_diag = QtGui.QAction("Diagnose exportieren …", self)
+        act_diag.triggered.connect(self.export_diagnostics)
+        mw.addAction(act_diag)
 
         mh = self.menuBar().addMenu("&Hilfe")
         act_update = QtGui.QAction("Nach Updates suchen …", self)
@@ -1297,6 +1300,29 @@ class MainWindow(QtWidgets.QMainWindow):
         self._update_status_totals()
         self.statusBar().showMessage(
             f"{n_t} Strecken und {n_v} Fahrzeuge umbenannt.", 10000)
+
+    def export_diagnostics(self):
+        """Diagnosebericht (0.4.13) als Textdatei sichern: je Strecke
+        Median und die fuenf schnellsten Bestzeiten/Runden mit Sitzungs-
+        und Dateiangaben. Dient der Ferndiagnose unmoeglicher Zeiten."""
+        path, _ = QtWidgets.QFileDialog.getSaveFileName(
+            self, "Diagnose exportieren",
+            os.path.join(default_app_dir(), "r3e-diagnose.txt"), "*.txt")
+        if not path:
+            return
+        try:
+            with open(path, "w", encoding="utf-8-sig") as f:
+                f.write(self.db.diagnostics_report())
+        except OSError as e:
+            QtWidgets.QMessageBox.warning(
+                self, "Diagnose", f"Export fehlgeschlagen: {e}")
+            return
+        QtWidgets.QMessageBox.information(
+            self, "Diagnose",
+            "Diagnosebericht gespeichert:\n" + path + "\n\n"
+            "Bitte hängen Sie diese Textdatei im Chat an, wenn Sie bei der "
+            "Fehleranalyse unterstützen möchten.")
+        self.statusBar().showMessage(f"Diagnose exportiert: {path}", 8000)
 
     def choose_raceroom_install(self):
         """Offizielle Spieldatenbank der RaceRoom-Installation einbinden

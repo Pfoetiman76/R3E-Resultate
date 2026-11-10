@@ -680,6 +680,76 @@ class Database:
             f"SELECT COALESCE(SUM(laps), 0) FROM entries {cond}").fetchone()[0]
         return n_s, n_l
 
+    def diagnostics_report(self):
+        """0.4.13: Klartext-Bericht fuer die Ferndiagnose auffaelliger
+        Zeiten (Menue 'Werkzeuge → Diagnose exportieren …'). Je Strecke
+        werden Median und die jeweils fuenf schnellsten Bestzeiten und
+        Runden (Tabelle laps) mit Sitzungs- und Fahrerdaten aufgelistet,
+        damit unmoegliche Werte (z. B. halbe Runden, Platzhalter) der
+        konkreten Datei zugeordnet werden koennen."""
+        import statistics
+        from .models import APP_VERSION, format_time_ms
+        lines = ["R3E Resultate - Diagnosebericht",
+                 f"App-Version: {APP_VERSION}",
+                 f"Datenbank: {self.path}",
+                 ""]
+        n_s = self.conn.execute("SELECT COUNT(*) FROM sessions").fetchone()[0]
+        n_e = self.conn.execute("SELECT COUNT(*) FROM entries").fetchone()[0]
+        n_l = self.conn.execute("SELECT COUNT(*) FROM laps").fetchone()[0]
+        n_dup = self.conn.execute(
+            "SELECT COUNT(*) FROM (SELECT source_file, session_type, "
+            "timestamp FROM sessions GROUP BY source_file, session_type, "
+            "timestamp HAVING COUNT(*) > 1)").fetchone()[0]
+        lines.append(f"Sitzungen: {n_s} | Eintraege: {n_e} | "
+                     f"Rundendetails: {n_l} | Sitzungs-Duplikate: {n_dup}")
+        lines.append("")
+        tracks = self.conn.execute(
+            "SELECT s.track, s.layout, COUNT(*) AS n FROM sessions s "
+            "GROUP BY s.track, s.layout ORDER BY s.track, s.layout").fetchall()
+        for t in tracks:
+            filt = "s.track = ?" + (" AND s.layout = ?" if t["layout"] else "")
+            params = [t["track"]] + ([t["layout"]] if t["layout"] else [])
+            lines.append(f"== {t['track']} - {t['layout'] or '(ohne Layout)'} "
+                         f"({t['n']} Sitzungen)")
+            bests = self.conn.execute(
+                "SELECT e.best_lap_ms, e.name, e.vehicle, e.vehicle_class, "
+                "e.ai, s.timestamp, s.source_file, s.session_type "
+                "FROM entries e JOIN sessions s ON s.id = e.session_id "
+                f"WHERE {filt} AND e.best_lap_ms > 0 "
+                "ORDER BY e.best_lap_ms ASC LIMIT 5", params).fetchall()
+            if bests:
+                med = statistics.median([r["best_lap_ms"] for r in
+                    self.conn.execute(
+                        "SELECT e.best_lap_ms FROM entries e "
+                        "JOIN sessions s ON s.id = e.session_id "
+                        f"WHERE {filt} AND e.best_lap_ms > 0",
+                        params).fetchall()])
+                lines.append(f"   Median aller Bestzeiten: "
+                             f"{format_time_ms(med)} ({int(med)} ms)")
+                for r in bests:
+                    lines.append(
+                        f"   Beste: {format_time_ms(r['best_lap_ms'])} "
+                        f"({r['best_lap_ms']} ms) | {r['name']} "
+                        f"({r['vehicle'] or '?'}, Klasse {r['vehicle_class'] or '?'}, "
+                        f"KI={r['ai']}) | {r['session_type']} "
+                        f"{r['timestamp']} | Datei: {r['source_file']}")
+            laps = self.conn.execute(
+                "SELECT l.lap_time_ms, l.lap_no, e.name, e.vehicle, "
+                "e.vehicle_class, e.ai, s.timestamp, s.source_file "
+                "FROM laps l JOIN entries e ON e.id = l.entry_id "
+                "JOIN sessions s ON s.id = e.session_id "
+                f"WHERE {filt} AND l.lap_time_ms > 0 "
+                "ORDER BY l.lap_time_ms ASC LIMIT 5", params).fetchall()
+            for r in laps:
+                lines.append(
+                    f"   Runde: {format_time_ms(r['lap_time_ms'])} "
+                    f"({r['lap_time_ms']} ms, Nr. {r['lap_no']}) | "
+                    f"{r['name']} ({r['vehicle'] or '?'}, "
+                    f"KI={r['ai']}) | {r['timestamp']} | "
+                    f"Datei: {r['source_file']}")
+            lines.append("")
+        return "\n".join(lines)
+
     # ------------------------------------------------ 0.4.1 Streckenrekorde --
 
     def track_classes(self, track, layout=""):
