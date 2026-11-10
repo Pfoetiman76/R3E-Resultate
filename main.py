@@ -460,6 +460,16 @@ class MainWindow(QtWidgets.QMainWindow):
         self.dte_to.setEnabled(False)
         self.dte_to.dateChanged.connect(self.refresh_sessions)
         filt2.addWidget(self.dte_to)
+        # 0.4.14: Kalender-Aufklappmenü — Samstage und Sonntage hellrot
+        # (Variante B), Werktage werden über das dunkle Design weiß
+        # dargestellt (QSS, rrc/theme.py).
+        for _dte in (self.dte_from, self.dte_to):
+            _cal = _dte.calendarWidget()
+            if _cal is not None:
+                _wknd = QtGui.QTextCharFormat()
+                _wknd.setForeground(QtGui.QColor("#ff5a63"))
+                _cal.setWeekdayTextFormat(QtCore.Qt.Saturday, _wknd)
+                _cal.setWeekdayTextFormat(QtCore.Qt.Sunday, _wknd)
         self.chk_date.toggled.connect(self._toggle_date_filter)
         filt2.addSpacing(12)
         filt2.addWidget(QtWidgets.QLabel("Strecke:"))
