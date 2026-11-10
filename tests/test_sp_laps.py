@@ -115,3 +115,75 @@ class TestSanitizeLaps(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main(verbosity=2)
+
+
+class TestTotalLapsDisplay(unittest.TestCase):
+    """0.4.13: Anzeige 'Runden gesamt / gueltig' (SP totallaps)."""
+
+    def setUp(self):
+        self.tmp = tempfile.TemporaryDirectory()
+        self.db = Database(os.path.join(self.tmp.name, "results.db"))
+
+    def tearDown(self):
+        self.db.close()
+        self.tmp.cleanup()
+
+    def _sp_session(self, drivers, ts="2026/11/07 20:44:54",
+                    src="2026_11_07_20_44_53_Practice.txt"):
+        data = {"header": {"time": ts},
+                "event": {"trackId": 12505, "layoutId": 12506},
+                "drivers": drivers}
+        return parse_sp_json(data, src)
+
+    def test_total_laps_parsed_and_stored(self):
+        laps = ([{"number": i, "lapTimeMs": -1} for i in range(6)]
+                + [{"number": 6 + i, "lapTimeMs": 100000 + i} for i in range(3)])
+        s = self._sp_session([_driver("Marcel Wijnandts", 9, laps)])
+        p = s.players[0]
+        self.assertEqual(p.laps, 3)          # gueltig
+        self.assertEqual(p.total_laps, 9)   # gesamt laut Datei
+        self.assertTrue(self.db.insert_session(s, s.source_file))
+        row = self.db.conn.execute(
+            "SELECT laps, total_laps FROM entries").fetchone()
+        self.assertEqual(row["laps"], 3)
+        self.assertEqual(row["total_laps"], 9)
+
+    def test_backfill_on_known_natural_key(self):
+        """Bestehende Sitzung (vor 0.4.13 ohne total_laps) erhaelt den
+        Wert beim erneuten Einlesen nachgezogen — ohne neue Sitzung."""
+        laps = [{"number": 0, "lapTimeMs": 106222},
+                {"number": 1, "lapTimeMs": 105000},
+                {"number": 2, "lapTimeMs": 104000}]
+        s = self._sp_session([_driver("Marcel Wijnandts", 9, laps)])
+        # Alt-Zustand nachbilden: Sitzung existiert, total_laps fehlt (-1).
+        cur = self.db.conn.execute(
+            "INSERT INTO sessions (digest, session_type, timestamp, track, "
+            "layout, source_file) VALUES (?,?,?,?,?,?)",
+            ("alt", s.session_type, s.timestamp, s.track, s.layout,
+             s.source_file))
+        self.db.conn.execute(
+            "INSERT INTO entries (session_id, position, name, vehicle, "
+            "laps, best_lap_ms, total_laps) VALUES (?,?,?,?,?,?,?)",
+            (cur.lastrowid, 1, "Marcel Wijnandts", "BMW M4 GT3",
+             3, 104000, -1))
+        self.db.conn.commit()
+        self.assertFalse(self.db.insert_session(s, s.source_file))
+        self.assertEqual(len(self.db.sessions()), 1)
+        row = self.db.conn.execute(
+            "SELECT laps, total_laps FROM entries").fetchone()
+        self.assertEqual((row["laps"], row["total_laps"]), (3, 9))
+
+    def test_artifact_excluded_from_total(self):
+        junk = [{"number": i, "lapTimeMs": -1} for i in range(856)]
+        s = self._sp_session([_driver("AI Driver", 856, junk)])
+        self.assertEqual(s.players[0].total_laps, 0)
+
+    def test_old_format_total_equals_laps(self):
+        s = self._sp_session([
+            {"name": "Marcel Wijnandts", "vehicle": "BMW M4 GT3",
+             "totallaps": 4, "bestlaptimems": 512340, "racetimems": 1800000,
+             "place": 1},
+        ])
+        p = s.players[0]
+        self.assertEqual(p.laps, 4)
+        self.assertEqual(p.total_laps, 4)

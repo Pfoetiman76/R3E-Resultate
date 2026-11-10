@@ -28,7 +28,8 @@ CREATE TABLE IF NOT EXISTS entries (
     finish_status TEXT DEFAULT '',
     car_id INTEGER DEFAULT 0,
     ai INTEGER DEFAULT -1,
-    vehicle_class TEXT DEFAULT ''
+    vehicle_class TEXT DEFAULT '',
+    total_laps INTEGER DEFAULT -1
 );
 CREATE TABLE IF NOT EXISTS laps (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -56,7 +57,7 @@ _RACE_LIKE = "Race"
 
 # Stand des Parsers, fuer den der Lese-Cache gueltig ist (0.4.11). Nach
 # Parser-Aenderungen erhoehen, damit alle Dateien einmal neu gelesen werden.
-_PARSER_CACHE_VER = 2
+_PARSER_CACHE_VER = 3
 
 # Bedingung: kein als KI erkannter Fahrer (0.4.10). ai = -1/NULL bedeutet
 # "unbekannt" (Server-/Multiplayer-Formate) und bleibt sichtbar.
@@ -91,7 +92,8 @@ class Database:
                 self.conn.execute("PRAGMA table_info(entries)").fetchall()}
         for col, decl in (("car_id", "INTEGER DEFAULT 0"),
                           ("ai", "INTEGER DEFAULT -1"),
-                          ("vehicle_class", "TEXT DEFAULT ''")):
+                          ("vehicle_class", "TEXT DEFAULT ''"),
+                          ("total_laps", "INTEGER DEFAULT -1")):
             if col not in cols:
                 self.conn.execute(
                     f"ALTER TABLE entries ADD COLUMN {col} {decl}")
@@ -165,6 +167,21 @@ class Database:
                     "AND session_type = ? AND timestamp = ? LIMIT 1",
                     (src, sess.session_type, sess.timestamp)).fetchone()
                 if known:
+                    # 0.4.13: Gesamt-Runden bestehender Sitzungen nachziehen
+                    # (Spalte total_laps kam spaeter hinzu). Nur fehlende
+                    # Werte (-1) setzen, sonst keine Alt-Daten anfassen.
+                    for p in sess.players:
+                        tl = getattr(p, "total_laps", -1)
+                        if tl < 0:
+                            continue
+                        self.conn.execute(
+                            "UPDATE entries SET total_laps = ? "
+                            "WHERE session_id IN (SELECT id FROM sessions "
+                            "WHERE source_file = ? AND session_type = ? "
+                            "AND timestamp = ?) AND name = ? "
+                            "AND total_laps < 0",
+                            (tl, src, sess.session_type,
+                             sess.timestamp, p.name))
                     self.conn.commit()
                     return False
             cur = self.conn.execute(
@@ -181,12 +198,12 @@ class Database:
                 ecur = self.conn.execute(
                     "INSERT INTO entries (session_id, position, name, vehicle, team,"
                     " laps, best_lap_ms, qual_ms, race_time_ms, finish_status,"
-                    " car_id, ai, vehicle_class)"
-                    " VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)",
+                    " car_id, ai, vehicle_class, total_laps)"
+                    " VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
                     (sess_id, p.position, p.name, p.vehicle, p.team, p.laps,
                      p.best_lap_ms, p.qual_ms, p.race_time_ms, p.finish_status,
                      getattr(p, "car_id", 0), getattr(p, "is_ai", -1),
-                     getattr(p, "vehicle_class", "")))
+                     getattr(p, "vehicle_class", ""), getattr(p, "total_laps", -1)))
                 if p.laps_detail:
                     self.conn.executemany(
                         "INSERT INTO laps (entry_id, lap_no, lap_time_ms,"

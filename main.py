@@ -31,7 +31,7 @@ from rrc.paths import default_app_dir, default_results_dir, default_db_path
 from rrc.theme import apply_dark_theme
 
 COL_SESSIONS = ["Datum", "Typ", "Strecke", "Fahrzeug", "Fahrer", "Bestzeit"]
-COL_ENTRIES = ["Pos.", "Fahrer", "Fahrzeug", "Runden", "Beste Runde", "Renzeit", "Status"]
+COL_ENTRIES = ["Pos.", "Fahrer", "Fahrzeug", "Runden ges./gültig", "Beste Runde", "Renzeit", "Status"]
 COL_BESTS = ["Fahrer", "Strecke", "Klasse", "Fahrzeug", "Bestzeit", "Fahrten", "Zuletzt"]
 COL_LAPS = ["Runde", "Zeit", "Sektor 1", "Sektor 2", "Sektor 3",
             "Delta zur besten", "Delta Rekord"]
@@ -878,11 +878,17 @@ class MainWindow(QtWidgets.QMainWindow):
         self._current_entries = [dict(e) for e in
                                   self.db.entries_for(row["id"],
                                                        names=self._name_filter())]
-        rows = [[e["position"], e["name"], e["vehicle"], e["laps"],
-                 format_time_ms(e["best_lap_ms"]),
-                 format_time_ms(e["race_time_ms"]),
-                 e["finish_status"] or ("Finished" if e["position"] else "")]
-                for e in self._current_entries]
+        rows = []
+        for e in self._current_entries:
+            # 0.4.13: 'gesamt / gueltig', wenn die Datei mehr Runden
+            # angibt als gueltige Rundenzeiten enthielt (SP-Format).
+            tot = e["total_laps"] if "total_laps" in e.keys() else -1
+            lapcell = (f"{tot} / {e['laps']}"
+                       if tot is not None and tot > e["laps"] else e["laps"])
+            rows.append([e["position"], e["name"], e["vehicle"], lapcell,
+                         format_time_ms(e["best_lap_ms"]),
+                         format_time_ms(e["race_time_ms"]),
+                         e["finish_status"] or ("Finished" if e["position"] else "")])
         self.entries_model.beginResetModel()
         self.entries_model.rows = rows
         self.entries_model.endResetModel()

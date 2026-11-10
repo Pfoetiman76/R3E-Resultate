@@ -28,6 +28,7 @@ class PlayerResult:
     car_id: int = 0            # internal RaceRoom car ID (SP results)
     is_ai: int = -1            # -1 unknown, 0 human, 1 AI (SP: userId -1)
     vehicle_class: str = ""    # e.g. 'GT3' (from official game data)
+    total_laps: int = -1       # Runden laut Datei (SP: 'totallaps'), -1 = unbekannt
 
     @property
     def finished(self) -> bool:

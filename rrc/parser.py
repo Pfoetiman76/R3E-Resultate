@@ -174,6 +174,9 @@ def parse_sp_json(data: dict, filename: str = "") -> Session:
             laps = 0
         else:
             laps = max(total_laps, 0)
+        # 0.4.13: Gesamt-Rundenzahl laut Datei fuer die Anzeige
+        # 'gesamt / gueltig' mitfuehren (Artefakt 856 bleibt ausgeschlossen).
+        total_laps = 0 if total_laps > 500 else max(total_laps, 0)
         sess.players.append(PlayerResult(
             name=str(name),
             vehicle=vehicle,
@@ -190,6 +193,7 @@ def parse_sp_json(data: dict, filename: str = "") -> Session:
             car_id=car_id,
             is_ai=is_ai,
             vehicle_class=vehicle_class,
+            total_laps=total_laps,
         ))
     sess.digest = make_digest(sess, filename)
     return sess
