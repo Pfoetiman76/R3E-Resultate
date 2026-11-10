@@ -338,7 +338,17 @@ class MainWindow(QtWidgets.QMainWindow):
 
         self.results_dir = default_results_dir()
         self.db_path = default_db_path()
-        self.db = Database(self.db_path)
+        try:
+            self.db = Database(self.db_path)
+        except Exception as e:
+            QtWidgets.QMessageBox.critical(
+                None, APP_NAME,
+                "Die Datenbank konnte nicht geöffnet werden:\n"
+                f"{e}\n\n"
+                "Läuft die App möglicherweise noch in einem anderen Fenster?\n"
+                "Bitte schließen Sie die andere Instanz und starten Sie "
+                "erneut.")
+            raise SystemExit(1)
         self._last_dir_stamp = None
         self._current_entries = []   # entries of the selected session (for export)
         self._lap_session_rows = {}  # session rows of the laps tab (0.4.1)

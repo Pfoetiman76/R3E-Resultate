@@ -43,10 +43,20 @@ CREATE INDEX IF NOT EXISTS idx_entries_session ON entries(session_id);
 CREATE INDEX IF NOT EXISTS idx_entries_name ON entries(name);
 CREATE INDEX IF NOT EXISTS idx_sessions_ts ON sessions(timestamp);
 CREATE INDEX IF NOT EXISTS idx_laps_entry ON laps(entry_id);
+CREATE TABLE IF NOT EXISTS ingest_cache (
+    name TEXT PRIMARY KEY,
+    mtime REAL,
+    size INTEGER,
+    ver INTEGER DEFAULT 1
+);
 """
 
 # Session types that count as "race" for statistics.
 _RACE_LIKE = "Race"
+
+# Stand des Parsers, fuer den der Lese-Cache gueltig ist (0.4.11). Nach
+# Parser-Aenderungen erhoehen, damit alle Dateien einmal neu gelesen werden.
+_PARSER_CACHE_VER = 2
 
 # Bedingung: kein als KI erkannter Fahrer (0.4.10). ai = -1/NULL bedeutet
 # "unbekannt" (Server-/Multiplayer-Formate) und bleibt sichtbar.
@@ -62,6 +72,14 @@ class Database:
         self.conn.row_factory = sqlite3.Row
         self.conn.executescript(_SCHEMA)
         self.conn.execute("PRAGMA foreign_keys = ON")
+        # 0.4.11: Transiente Sperren (z. B. Antivirus, Cloud-Sync oder eine
+        # zweite App-Instanz) abwarten statt abzustuerzen; WAL ermoeglicht
+        # Lesen waehrend geschrieben wird und beschleunigt Commits.
+        try:
+            self.conn.execute("PRAGMA busy_timeout = 10000")
+            self.conn.execute("PRAGMA journal_mode = WAL")
+        except sqlite3.Error:
+            pass
         self._migrate_entries()
         self.conn.commit()
 
@@ -84,7 +102,11 @@ class Database:
     # ------------------------------------------------------------ ingest --
 
     def ingest_folder(self, folder: str, extensions=(".txt", ".json", ".xml")):
-        """Scan folder, ingest all result files. Returns (added, skipped, errors)."""
+        """Scan folder, ingest all result files. Returns (added, skipped, errors).
+
+        0.4.11: Unveraenderte Dateien (gleiche Groesse + Aenderungszeit,
+        gleicher Parser-Stand) werden uebersprungen – der Start bleibt
+        auch bei hunderten Ergebnisdateien schnell."""
         added = skipped = errors = 0
         try:
             names = sorted(os.listdir(folder))
@@ -95,6 +117,19 @@ class Database:
                 continue
             full = os.path.join(folder, name)
             if not os.path.isfile(full):
+                continue
+            try:
+                st = os.stat(full)
+            except OSError:
+                errors += 1
+                continue
+            row = self.conn.execute(
+                "SELECT mtime, size, ver FROM ingest_cache WHERE name = ?",
+                (name,)).fetchone()
+            if (row and row["ver"] == _PARSER_CACHE_VER
+                    and row["size"] == st.st_size
+                    and abs(row["mtime"] - st.st_mtime) < 1.0):
+                skipped += 1
                 continue
             sessions = parse_file(full)
             if not sessions:
@@ -107,6 +142,10 @@ class Database:
                     added += 1
             if not new:
                 skipped += 1
+            self.conn.execute(
+                "INSERT OR REPLACE INTO ingest_cache"
+                " (name, mtime, size, ver) VALUES (?,?,?,?)",
+                (name, st.st_mtime, st.st_size, _PARSER_CACHE_VER))
         self.conn.commit()
         return added, skipped, errors
 
@@ -243,6 +282,8 @@ class Database:
                          getattr(p, "vehicle_class", ""), e["id"]))
                     updates += 1
                 n += updates
+                if updates:
+                    self.conn.commit()   # je Sitzung: abbruch sicher fortsetzbar
         self.conn.commit()
         return n
 
