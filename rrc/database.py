@@ -57,7 +57,7 @@ _RACE_LIKE = "Race"
 
 # Stand des Parsers, fuer den der Lese-Cache gueltig ist (0.4.11). Nach
 # Parser-Aenderungen erhoehen, damit alle Dateien einmal neu gelesen werden.
-_PARSER_CACHE_VER = 3
+_PARSER_CACHE_VER = 4
 
 # Bedingung: kein als KI erkannter Fahrer (0.4.10). ai = -1/NULL bedeutet
 # "unbekannt" (Server-/Multiplayer-Formate) und bleibt sichtbar.
@@ -170,18 +170,41 @@ class Database:
                     # 0.4.13: Gesamt-Runden bestehender Sitzungen nachziehen
                     # (Spalte total_laps kam spaeter hinzu). Nur fehlende
                     # Werte (-1) setzen, sonst keine Alt-Daten anfassen.
+                    # 0.4.14: Rundendetails (inkl. ungueltiger Runden,
+                    # lap_time_ms -1) erneuern, damit Bestandssitzungen
+                    # die neuen Platzhalter-Runden erhalten.
                     for p in sess.players:
                         tl = getattr(p, "total_laps", -1)
-                        if tl < 0:
+                        detail = getattr(p, "laps_detail", None) or []
+                        if tl < 0 and not detail:
                             continue
-                        self.conn.execute(
-                            "UPDATE entries SET total_laps = ? "
-                            "WHERE session_id IN (SELECT id FROM sessions "
-                            "WHERE source_file = ? AND session_type = ? "
-                            "AND timestamp = ?) AND name = ? "
-                            "AND total_laps < 0",
-                            (tl, src, sess.session_type,
-                             sess.timestamp, p.name))
+                        ecur = self.conn.execute(
+                            "SELECT id FROM entries WHERE session_id IN "
+                            "(SELECT id FROM sessions WHERE source_file = ?"
+                            " AND session_type = ? AND timestamp = ?) "
+                            "AND name = ? LIMIT 1",
+                            (src, sess.session_type, sess.timestamp,
+                             p.name)).fetchone()
+                        if ecur is None:
+                            continue
+                        if tl >= 0:
+                            self.conn.execute(
+                                "UPDATE entries SET total_laps = ? "
+                                "WHERE id = ? AND total_laps < 0",
+                                (tl, ecur["id"]))
+                        if detail:
+                            self.conn.execute(
+                                "DELETE FROM laps WHERE entry_id = ?",
+                                (ecur["id"],))
+                            self.conn.executemany(
+                                "INSERT INTO laps (entry_id, lap_no, "
+                                "lap_time_ms, s1_ms, s2_ms, s3_ms) "
+                                "VALUES (?,?,?,?,?,?)",
+                                [(ecur["id"], lp.lap_no, lp.lap_time_ms,
+                                  (lp.sector_times_ms + [0, 0, 0])[0],
+                                  (lp.sector_times_ms + [0, 0, 0])[1],
+                                  (lp.sector_times_ms + [0, 0, 0])[2])
+                                 for lp in detail])
                     self.conn.commit()
                     return False
             cur = self.conn.execute(

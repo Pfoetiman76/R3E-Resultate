@@ -28,7 +28,8 @@ class TestSpLaps(unittest.TestCase):
         return parse_sp_json(data, "2026_11_07_20_44_53_Practice.txt")
 
     def test_valid_laps_only(self):
-        """Nur Runden mit gueltiger Zeit zaehlen; -1-Platzhalter entfallen."""
+        """Nur Runden mit gueltiger Zeit zaehlen; ungueltige Platzhalter
+        werden seit 0.4.14 mit lap_time_ms -1 mitgefuehrt (rot)."""
         s = self._session([
             _driver("Marcel Wijnandts", 2,
                     [{"number": 0, "lapTimeMs": -1},
@@ -36,8 +37,22 @@ class TestSpLaps(unittest.TestCase):
         ])
         p = s.players[0]
         self.assertEqual(p.laps, 1)
-        self.assertEqual(len(p.laps_detail), 1)
-        self.assertEqual(p.laps_detail[0].lap_time_ms, 106222)
+        self.assertEqual(len(p.laps_detail), 2)
+        self.assertEqual(p.laps_detail[0].lap_time_ms, -1)   # ungueltig
+        self.assertEqual(p.laps_detail[1].lap_time_ms, 106222)
+
+    def test_invalid_laps_of_ai_not_stored(self):
+        """KI-Fahrer (userId -1): ungueltige Platzhalter nicht speichern."""
+        s = self._session([
+            {"name": "AI Driver", "userId": -1, "carId": 111,
+             "totalLaps": 2,
+             "bestLapTimeMs": 100000, "raceTimeMs": -1, "place": 2,
+             "laps": [{"number": 0, "lapTimeMs": -1},
+                      {"number": 1, "lapTimeMs": -1}]},
+        ])
+        p = s.players[0]
+        self.assertEqual(p.is_ai, 1)
+        self.assertEqual(p.laps_detail, [])
 
     def test_ai_artifact_without_valid_laps(self):
         """KI-Fahrer: totalLaps 856 ohne gueltige Zeiten -> 0 Runden."""
@@ -187,3 +202,65 @@ class TestTotalLapsDisplay(unittest.TestCase):
         p = s.players[0]
         self.assertEqual(p.laps, 4)
         self.assertEqual(p.total_laps, 4)
+
+
+class TestInvalidLapsRefresh(unittest.TestCase):
+    """0.4.14: Ungueltige Runden (lap_time_ms -1) in der Rundenansicht
+    sichtbar machen; Bestandssitzungen erhalten sie beim erneuten
+    Einlesen nachgezogen."""
+
+    def setUp(self):
+        self.tmp = tempfile.TemporaryDirectory()
+        self.db = Database(os.path.join(self.tmp.name, "results.db"))
+
+    def tearDown(self):
+        self.db.close()
+        self.tmp.cleanup()
+
+    def _sp_session(self, laps, ts="2026/11/09 19:00:00"):
+        data = {"header": {"time": ts},
+                "event": {"trackId": 12505, "layoutId": 12506},
+                "drivers": [_driver("Marcel Wijnandts", len(laps), laps)]}
+        return parse_sp_json(data, "2026_11_09_19_00_00_Practice.txt")
+
+    def test_invalid_laps_persisted_and_refreshed(self):
+        laps = ([{"number": 0, "lapTimeMs": 106000},
+                 {"number": 1, "lapTimeMs": -1},
+                 {"number": 2, "lapTimeMs": 105000},
+                 {"number": 3, "lapTimeMs": -1},
+                 {"number": 4, "lapTimeMs": 104000}])
+        s = self._sp_session(laps)
+        self.assertEqual(s.players[0].laps, 3)
+        self.assertEqual(len(s.players[0].laps_detail), 5)
+        self.assertTrue(self.db.insert_session(s, s.source_file))
+        times = [r["lap_time_ms"] for r in self.db.conn.execute(
+            "SELECT lap_time_ms FROM laps ORDER BY lap_no")]
+        self.assertEqual(times, [106000, -1, 105000, -1, 104000])
+        # Erneutes Einlesen (natural key bekannt): Rundendetails werden
+        # erneuert, ohne eine zweite Sitzung zu erzeugen.
+        self.assertFalse(self.db.insert_session(s, s.source_file))
+        self.assertEqual(len(self.db.sessions()), 1)
+        times = [r["lap_time_ms"] for r in self.db.conn.execute(
+            "SELECT lap_time_ms FROM laps ORDER BY lap_no")]
+        self.assertEqual(times, [106000, -1, 105000, -1, 104000])
+
+    def test_backfill_laps_for_existing_session(self):
+        """Alte Sitzung ohne Rundendetails erhaelt sie beim erneuten
+        Einlesen nachgezogen."""
+        laps = [{"number": 0, "lapTimeMs": -1},
+                {"number": 1, "lapTimeMs": 106000}]
+        s = self._sp_session(laps)
+        cur = self.db.conn.execute(
+            "INSERT INTO sessions (digest, session_type, timestamp, track, "
+            "layout, source_file) VALUES (?,?,?,?,?,?)",
+            ("alt", s.session_type, s.timestamp, s.track, s.layout,
+             s.source_file))
+        self.db.conn.execute(
+            "INSERT INTO entries (session_id, position, name, vehicle, "
+            "laps, best_lap_ms) VALUES (?,?,?,?,?,?)",
+            (cur.lastrowid, 1, "Marcel Wijnandts", "Cayman GT4", 1, 106000))
+        self.db.conn.commit()
+        self.assertFalse(self.db.insert_session(s, s.source_file))
+        times = [r["lap_time_ms"] for r in self.db.conn.execute(
+            "SELECT lap_time_ms FROM laps ORDER BY lap_no")]
+        self.assertEqual(times, [-1, 106000])

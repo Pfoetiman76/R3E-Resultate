@@ -1020,8 +1020,22 @@ class MainWindow(QtWidgets.QMainWindow):
         record_ms = rec.get("best_ms") or 0
         if sid is not None and eid is not None:
             laps = [dict(l) for l in self.db.laps_for_session(sid) if l["entry_id"] == eid]
-            best = min((l["lap_time_ms"] for l in laps), default=0)
+            # 0.4.14: Ungueltige Runden (lap_time_ms <= 0, z. B. Platzhalter
+            # in SP-Dateien) anzeigen, aber rot kennzeichnen und von den
+            # Bestwert-Berechnungen ausnehmen.
+            best = min((l["lap_time_ms"] for l in laps
+                        if l["lap_time_ms"] > 0), default=0)
             for i, l in enumerate(laps):
+                if l["lap_time_ms"] <= 0:
+                    rows.append([l["lap_no"], "–",
+                                 format_time_ms(l["s1_ms"]),
+                                 format_time_ms(l["s2_ms"]),
+                                 format_time_ms(l["s3_ms"]),
+                                 "ungültig", "–"])
+                    colors[(i, 0)] = "#f44336"     # Rundennr. rot
+                    colors[(i, 1)] = "#f44336"     # Zeit rot
+                    colors[(i, 5)] = "#f44336"     # Kennzeichnung rot
+                    continue
                 delta = l["lap_time_ms"] - best if best else 0
                 sign = "+" if delta > 0 else ""
                 d_rec = l["lap_time_ms"] - record_ms if record_ms else None

@@ -156,19 +156,28 @@ def parse_sp_json(data: dict, filename: str = "") -> Session:
         # KI-Fahrer enthaelt nur Platzhalter (lapTimeMs -1) sowie einen
         # Artefakt-Wert in totalLaps (immer 856, unabhaengig vom Fahren);
         # gezaehlt werden ausschliesslich Runden mit gueltiger Zeit.
+        # 0.4.14: Ungueltige Runden echter Fahrer werden mit lap_time_ms -1
+        # mitgefuehrt, damit die Rundenansicht sie rot anzeigen kann; der
+        # KI-Artefakt (>500 Platzhalter) bleibt vollstaendig draussen.
+        raw_laps = [lp for lp in d.get("laps") or []
+                    if isinstance(lp, dict)]
+        artifact = len(raw_laps) > 500
         laps_detail = []
-        for lp in d.get("laps") or []:
-            if not isinstance(lp, dict):
-                continue
+        n_valid = 0
+        for lp in raw_laps:
             lt = _ms(_first(lp, "lapTimeMs", "lapTimems", "laptime",
                             default=0))
             if lt > 0:
                 laps_detail.append(
                     LapEntry(_ms(_first(lp, "number", default=0)), lt, []))
+                n_valid += 1
+            elif not artifact and is_ai != 1:
+                laps_detail.append(
+                    LapEntry(_ms(_first(lp, "number", default=0)), -1, []))
         total_laps = _ms(_first(d, "totallaps", "totalLaps", "laps",
                                 default=0))
         if laps_detail:
-            laps = len(laps_detail)
+            laps = n_valid
         elif total_laps > 500:
             # KI-Artefakt (856) ohne eine einzige gueltige Rundenzeit
             laps = 0
