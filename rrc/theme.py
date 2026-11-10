@@ -42,6 +42,10 @@ QPushButton#primary:hover { background: @ACC_H@; border-color: @ACC_H@; }
 QPushButton#primary:pressed { background: @ACC_D@; }
 QTextEdit, QLineEdit, QComboBox, QSpinBox, QDoubleSpinBox { background: @INPUT@; color: @TEXT@; border: 1px solid @LINE@; border-radius: 2px; selection-background-color: @ACC@; selection-color: #ffffff; }
 QLineEdit:focus, QComboBox:focus, QTextEdit:focus, QSpinBox:focus, QDoubleSpinBox:focus { border: 1px solid @ACC_D@; }
+QDateEdit, QTimeEdit { background: @INPUT@; color: #ffffff; border: 1px solid @LINE@; border-radius: 2px; padding: 3px 10px; selection-background-color: @ACC@; selection-color: #ffffff; }
+QDateEdit:focus, QTimeEdit:focus { border: 1px solid @ACC_D@; }
+QDateEdit::up-button, QDateEdit::down-button, QTimeEdit::up-button, QTimeEdit::down-button { background: @PANEL2@; border: none; width: 18px; }
+QDateEdit::up-button:hover, QDateEdit::down-button:hover, QTimeEdit::up-button:hover, QTimeEdit::down-button:hover { background: @ACC@; }
 QComboBox { padding: 3px 30px 3px 10px; min-height: 28px; }
 QComboBox::drop-down { subcontrol-origin: padding; subcontrol-position: right center; width: 26px; border: none; border-left: 1px solid @LINE@; background: @PANEL2@; }
 QComboBox::drop-down:hover { background: @ACC@; }
