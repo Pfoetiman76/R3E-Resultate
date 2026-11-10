@@ -42,7 +42,7 @@ class TestIngestCache(unittest.TestCase):
         self.tmp.cleanup()
 
     def test_version(self):
-        self.assertEqual(APP_VERSION, "0.4.11")
+        self.assertEqual(APP_VERSION, "0.4.12")
 
     def test_second_scan_skips_unchanged_files(self):
         _write_result(self.folder, "2026_11_07_20_44_53_Practice.txt")
@@ -70,7 +70,10 @@ class TestIngestCache(unittest.TestCase):
                               "2026_11_07_20_44_53_Practice.txt"),
                  (time.time() + 5, time.time() + 5))
         added, skipped, errors = self.db.ingest_folder(self.folder)
-        self.assertEqual(added, 1)   # geaenderte Datei = neue Sitzung (neuer Digest)
+        # gleiche Quelldatei + Typ + Zeit = gleiche Sitzung, auch wenn der
+        # Dateiinhalt (Bestzeit) veraendert wurde — RaceRoom-Dateien sind
+        # unabhaenderlich; der Cache wird dennoch aktualisiert
+        self.assertEqual(added, 0)
         row = self.db.conn.execute(
             "SELECT size FROM ingest_cache").fetchone()
         self.assertEqual(row["size"],

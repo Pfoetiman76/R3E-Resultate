@@ -152,6 +152,21 @@ class Database:
     def insert_session(self, sess, source_path: str = "") -> bool:
         """Insert session if digest unknown (incl. lap details). True if inserted."""
         try:
+            # 0.4.12: Natuerlicher Schluessel vor dem Digest pruefen.
+            # Der Digest enthaelt aufgeloeste Strecken-/Fahrzeugnamen und
+            # aendert sich, wenn die Id-Aufloesung zwischen App-Versionen
+            # verbessert wird — dieselbe Datei waere sonst ein "neue"
+            # Sitzung. Quelldatei + Typ + Zeit identifizieren eine
+            # Sitzung dagegen stabil.
+            src = sess.source_file or os.path.basename(source_path)
+            if src and sess.timestamp:
+                known = self.conn.execute(
+                    "SELECT 1 FROM sessions WHERE source_file = ? "
+                    "AND session_type = ? AND timestamp = ? LIMIT 1",
+                    (src, sess.session_type, sess.timestamp)).fetchone()
+                if known:
+                    self.conn.commit()
+                    return False
             cur = self.conn.execute(
                 "INSERT OR IGNORE INTO sessions "
                 "(digest, session_type, timestamp, track, layout, source_file) "
@@ -240,6 +255,30 @@ class Database:
         n = max(cur.rowcount, 0)
         self.conn.commit()
         return n
+
+    def dedupe_sessions(self):
+        """0.4.12: Bereinigt Sitzungs-Duplikate, die durch verbesserte
+        Id-Aufloesung zwischen App-Versionen entstanden sind (gleiche
+        Quelldatei, Typ und Zeit, aber anderer Digest → mehrfach
+        gespeichert). Behalten wird die juengste Zeile — sie wurde mit
+        dem aktuellsten Parser eingelesen (Fahrzeug, KI-Kennzeichen,
+        Rundendetails). Rueckgabe: Anzahl geloeschter Sitzungen."""
+        rows = self.conn.execute(
+            "SELECT COUNT(*) AS n, MAX(id) AS keep_id, source_file, "
+            "session_type, timestamp FROM sessions "
+            "GROUP BY source_file, session_type, timestamp "
+            "HAVING n > 1").fetchall()
+        total = 0
+        for r in rows:
+            cur = self.conn.execute(
+                "DELETE FROM sessions WHERE source_file = ? "
+                "AND session_type = ? AND timestamp = ? AND id != ?",
+                (r["source_file"], r["session_type"], r["timestamp"],
+                 r["keep_id"]))
+            total += max(cur.rowcount, 0)
+        if total:
+            self.conn.commit()
+        return total
 
     def backfill_from_files(self, folder):
         """Ab 0.4.10: Bereits gespeicherte Sitzungen nachtraeglich um

@@ -368,6 +368,9 @@ class MainWindow(QtWidgets.QMainWindow):
         # wurden) sowie Haken "KI-Fahrer ausblenden" an die Datenbank geben
         self.db.backfill_from_files(self.results_dir)
         self.db.hide_ai = bool(self.settings.get("hide_ai"))
+        # 0.4.12: Sitzungs-Duplikate entfernen (entstanden durch verbesserte
+        # Id-Aufloesung zwischen Versionen); die juengste Zeile bleibt.
+        n_dup = self.db.dedupe_sessions()
 
         self.tabs = QtWidgets.QTabWidget()
         self.setCentralWidget(self.tabs)
@@ -392,6 +395,10 @@ class MainWindow(QtWidgets.QMainWindow):
         self.chk_hide_ai.setChecked(bool(self.settings.get("hide_ai")))
         self.chk_hide_ai.blockSignals(False)
         self.rescan(silent=True)
+        if n_dup:
+            self.statusBar().showMessage(
+                f"{n_dup} Sitzungs-Duplikate bereinigt — alle Werte "
+                "entsprechend korrigiert.", 12000)
         self._auto_check_updates()
 
     # ------------------------------------------------------------- Tabs --

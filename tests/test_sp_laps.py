@@ -79,7 +79,8 @@ class TestSanitizeLaps(unittest.TestCase):
         self.tmp.cleanup()
 
     def _insert(self, laps, detail=None):
-        sess = Session(session_type="Race", timestamp="2026-11-07 20:44:53",
+        sess = Session(session_type="Race",
+                       timestamp="2026-11-07 20:44:5" + str(abs(laps) % 10),
                        track="Testring", layout="Grand Prix",
                        source_file="a.txt", digest="d-" + str(laps) +
                        str(len(detail or [])) + str(os.getpid()))
