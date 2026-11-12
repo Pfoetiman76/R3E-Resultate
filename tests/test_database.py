@@ -360,7 +360,7 @@ class TestTimestampMigration(unittest.TestCase):
     Versionen werden beim Oeffnen normalisiert; der Datums-Filter greift."""
 
     def setUp(self):
-        self.tmp = tempfile.TemporaryDirectory()
+        self.tmp = tempfile.TemporaryDirectory(ignore_cleanup_errors=True)
         self.path = os.path.join(self.tmp.name, "migrate.db")
 
     def tearDown(self):
@@ -385,18 +385,23 @@ class TestTimestampMigration(unittest.TestCase):
         conn.close()
         self._insert_legacy()
         db = Database(self.path)
-        rows = db.sessions()
-        self.assertEqual(len(rows), 1)
-        self.assertEqual(rows[0]["timestamp"], "2026-11-09 20:44:53")
-        db.close()
+        try:
+            rows = db.sessions()
+            self.assertEqual(len(rows), 1)
+            self.assertEqual(rows[0]["timestamp"], "2026-11-09 20:44:53")
+        finally:
+            db.close()
 
     def test_date_filter_matches_sessions(self):
         db = Database(self.path)
-        db.ingest_folder(SAMPLES)
-        rows = db.sessions(date_from="2023-06-01", date_to="2023-06-30")
-        self.assertTrue(rows, "Datums-Filter muss die SP-Sitzung finden")
-        for r in rows:
-            self.assertNotIn("/", r["timestamp"])
-        # Zeitraum ausserhalb -> leer
-        self.assertEqual(db.sessions(date_from="2024-01-01"), [])
-        db.close()
+        try:
+            db.ingest_folder(SAMPLES)
+            rows = db.sessions(date_from="2023-06-01", date_to="2023-06-30")
+            self.assertTrue(rows, "Datums-Filter muss die SP-Sitzung finden")
+            for r in rows:
+                self.assertNotIn("/", r["timestamp"])
+            # Zeitraum weit in der Zukunft -> leer (die Beispieldateien
+            # enthalten Sitzungen ueber mehrere Jahre)
+            self.assertEqual(db.sessions(date_from="2099-01-01"), [])
+        finally:
+            db.close()
