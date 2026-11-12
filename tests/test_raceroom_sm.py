@@ -38,7 +38,7 @@ class TestR3EReader(unittest.TestCase):
 
     def test_version(self):
         from rrc.models import APP_VERSION
-        self.assertEqual(APP_VERSION, "0.5.0")
+        self.assertEqual(APP_VERSION, "0.5.1")
 
     def test_felder(self):
         d = _block()

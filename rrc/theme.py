@@ -46,11 +46,13 @@ QDateEdit, QTimeEdit { background: @INPUT@; color: #ffffff; border: 1px solid @L
 QDateEdit:focus, QTimeEdit:focus { border: 1px solid @ACC_D@; }
 QDateEdit::up-button, QDateEdit::down-button, QTimeEdit::up-button, QTimeEdit::down-button { background: @PANEL2@; border: none; width: 18px; }
 QDateEdit::up-button:hover, QDateEdit::down-button:hover, QTimeEdit::up-button:hover, QTimeEdit::down-button:hover { background: @ACC@; }
-QCalendarWidget { background: @PANEL@; }
+QCalendarWidget { background: @PANEL@; font-size: 10pt; }
 QCalendarWidget #qt_calendar_navigationbar { background: @HEAD@; }
-QCalendarWidget #qt_calendar_prevbutton, QCalendarWidget #qt_calendar_nextbutton { background: transparent; }
-QCalendarWidget #qt_calendar_monthbutton, QCalendarWidget #qt_calendar_yearbutton { background: transparent; color: @TEXT@; }
-QCalendarWidget #qt_calendar_calendarview { background: @PANEL@; color: #ffffff; alternate-background-color: @PANEL2@; selection-background-color: @SEL@; selection-color: #ff5a63; }
+QCalendarWidget #qt_calendar_prevbutton, QCalendarWidget #qt_calendar_nextbutton { background: @BTN@; border: 1px solid @LINE@; min-width: 28px; min-height: 22px; }
+QCalendarWidget #qt_calendar_prevbutton:hover, QCalendarWidget #qt_calendar_nextbutton:hover { background: @ACC@; border-color: @ACC_D@; }
+QCalendarWidget #qt_calendar_monthbutton, QCalendarWidget #qt_calendar_yearbutton { background: transparent; color: @TEXT@; font-weight: 600; }
+QCalendarWidget #qt_calendar_calendarview { background: @PANEL@; color: #ffffff; alternate-background-color: @PANEL2@; selection-background-color: @ACC@; selection-color: #ffffff; outline: 0; }
+QCalendarWidget QWidget#qt_calendar_calendarview::item { color: #ffffff; }
 QComboBox { padding: 3px 30px 3px 10px; min-height: 28px; }
 QComboBox::drop-down { subcontrol-origin: padding; subcontrol-position: right center; width: 26px; border: none; border-left: 1px solid @LINE@; background: @PANEL2@; }
 QComboBox::drop-down:hover { background: @ACC@; }

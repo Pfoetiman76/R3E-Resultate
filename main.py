@@ -474,16 +474,16 @@ class MainWindow(QtWidgets.QMainWindow):
         self.dte_to.setEnabled(False)
         self.dte_to.dateChanged.connect(self.refresh_sessions)
         filt2.addWidget(self.dte_to)
-        # 0.4.14: Kalender-Aufklappmenü — Samstage und Sonntage hellrot
-        # (Variante B), Werktage werden über das dunkle Design weiß
-        # dargestellt (QSS, rrc/theme.py).
+        # 0.5.1: Kalender-Aufklappmenü überarbeitet (Marcels Screenshot:
+        # zweistellige Tageszahlen ab 10 waren abgeschnitten, Kontrast
+        # zu schwach). Der Kalender erhält eine feste Mindestgröße, damit
+        # jede Spalte zweistellige Zahlen sicher fasst, plus reinweiße
+        # fette Tageszahlen, kräftig rote Wochenenden, gelbes „Heute“
+        # und (per QSS, rrc/theme.py) RaceRoom-Rot als Auswahl-Markierung.
         for _dte in (self.dte_from, self.dte_to):
             _cal = _dte.calendarWidget()
             if _cal is not None:
-                _wknd = QtGui.QTextCharFormat()
-                _wknd.setForeground(QtGui.QColor("#ff5a63"))
-                _cal.setWeekdayTextFormat(QtCore.Qt.Saturday, _wknd)
-                _cal.setWeekdayTextFormat(QtCore.Qt.Sunday, _wknd)
+                self._style_calendar(_cal)
         self.chk_date.toggled.connect(self._toggle_date_filter)
         filt2.addSpacing(12)
         filt2.addWidget(QtWidgets.QLabel("Strecke:"))
@@ -918,6 +918,37 @@ class MainWindow(QtWidgets.QMainWindow):
     def _toggle_date_filter(self, checked):
         self.dte_from.setEnabled(checked)
         self.dte_to.setEnabled(checked)
+
+    def _style_calendar(self, cal):
+        """0.5.1: Kalender lesbar machen (Kontrast, Größe, „Heute“)."""
+        cal.setVerticalHeaderFormat(QtWidgets.QCalendarWidget.ISOWeekNumbers)
+        cal.setHorizontalHeaderFormat(QtWidgets.QCalendarWidget.ShortDayNames)
+        # Mindestgröße: jede Tagesspalte muss zweistellige Zahlen fassen
+        # (Marcels Screenshot: „10“ ff. waren abgeschnitten).
+        cal.setMinimumSize(330, 250)
+        cal.setFont(QtGui.QFont("Segoe UI", 10))
+        # Werktage reinweiß und fett, Wochenende kräftig hellrot
+        _wk = QtGui.QTextCharFormat()
+        _wk.setForeground(QtGui.QColor("#ffffff"))
+        _wk.setFontWeight(QtGui.QFont.Bold)
+        _wknd = QtGui.QTextCharFormat()
+        _wknd.setForeground(QtGui.QColor("#ff5a63"))
+        _wknd.setFontWeight(QtGui.QFont.Bold)
+        for _day in (QtCore.Qt.Monday, QtCore.Qt.Tuesday, QtCore.Qt.Wednesday,
+                     QtCore.Qt.Thursday, QtCore.Qt.Friday):
+            cal.setWeekdayTextFormat(_day, _wk)
+        for _day in (QtCore.Qt.Saturday, QtCore.Qt.Sunday):
+            cal.setWeekdayTextFormat(_day, _wknd)
+        # Kopfzeile (Wochentage/Kalenderwochen) hell und lesbar
+        _head = QtGui.QTextCharFormat()
+        _head.setForeground(QtGui.QColor("#c9c9d2"))
+        _head.setFontWeight(QtGui.QFont.DemiBold)
+        cal.setHeaderTextFormat(_head)
+        # „Heute“: gelbe, fette Zahl (Rahmen stellt QTextCharFormat nicht bereit)
+        _today = QtGui.QTextCharFormat()
+        _today.setForeground(QtGui.QColor("#e8c34a"))
+        _today.setFontWeight(QtGui.QFont.Bold)
+        cal.setDateTextFormat(QtCore.QDate.currentDate(), _today)
 
     def _reload_filter_combos(self):
         """Strecken-/Fahrzeug-Filter neu laden, Auswahl möglichst behalten."""
