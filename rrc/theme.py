@@ -52,7 +52,9 @@ QCalendarWidget #qt_calendar_prevbutton, QCalendarWidget #qt_calendar_nextbutton
 QCalendarWidget #qt_calendar_prevbutton:hover, QCalendarWidget #qt_calendar_nextbutton:hover { background: @ACC@; border-color: @ACC_D@; }
 QCalendarWidget #qt_calendar_monthbutton, QCalendarWidget #qt_calendar_yearbutton { background: transparent; color: @TEXT@; font-weight: 600; }
 QCalendarWidget #qt_calendar_calendarview { background: @PANEL@; color: #ffffff; alternate-background-color: @PANEL2@; selection-background-color: @ACC@; selection-color: #ffffff; outline: 0; }
-QCalendarWidget QWidget#qt_calendar_calendarview::item { color: #ffffff; }
+# 0.5.2: KEINE ::item-Regel mehr — ein Stylesheet-::item überschreibt die
+# per setDateTextFormat/setWeekdayTextFormat gesetzten Farbformate (Wochenende
+# rot, „Heute“ gelb) und war die Ursache dafür, dass 0.5.1 sie nicht zeigte.
 QComboBox { padding: 3px 30px 3px 10px; min-height: 28px; }
 QComboBox::drop-down { subcontrol-origin: padding; subcontrol-position: right center; width: 26px; border: none; border-left: 1px solid @LINE@; background: @PANEL2@; }
 QComboBox::drop-down:hover { background: @ACC@; }

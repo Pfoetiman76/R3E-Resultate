@@ -42,7 +42,7 @@ class TestIngestCache(unittest.TestCase):
         self.tmp.cleanup()
 
     def test_version(self):
-        self.assertEqual(APP_VERSION, "0.5.1")
+        self.assertEqual(APP_VERSION, "0.5.2")
 
     def test_second_scan_skips_unchanged_files(self):
         _write_result(self.folder, "2026_11_07_20_44_53_Practice.txt")

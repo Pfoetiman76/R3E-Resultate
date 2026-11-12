@@ -84,6 +84,7 @@ class Database:
             pass
         self._migrate_entries()
         self._migrate_laps()
+        self._migrate_timestamps()
         self.conn.commit()
 
     def _migrate_entries(self):
@@ -99,6 +100,18 @@ class Database:
             if col not in cols:
                 self.conn.execute(
                     f"ALTER TABLE entries ADD COLUMN {col} {decl}")
+
+    def _migrate_timestamps(self):
+        """0.5.2: SP-Sitzungen wurden bis 0.5.1 mit dem Roh-Zeitstempel der
+        Ergebnisdatei ('YYYY/MM/DD HH:MM:SS', Schraegstriche) gespeichert.
+        Der Datums-Filter der Sitzungsliste vergleicht Strings gegen
+        'YYYY-MM-DD ...' — Schraegstrich-Zeitstempel sortieren immer
+        dahinter, weshalb der Filter alle Sitzungen ausgrenzete.
+        Bestandszeilen werden einmalig normalisiert; der Parser schreibt
+        neue Sitzungen direkt normalisiert (siehe parser.normalize_timestamp)."""
+        self.conn.execute(
+            "UPDATE sessions SET timestamp = replace(timestamp, '/', '-') "
+            "WHERE timestamp LIKE '%/%'")
 
     def _migrate_laps(self):
         """0.5.0: Spalte 'valid' nachruesten — aeltere Datenbanken bleiben

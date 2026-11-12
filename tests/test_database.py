@@ -353,3 +353,50 @@ class TestStatsCorrection(unittest.TestCase):
         stats, _ = self.db.stats_summary(driver="KI B")
         self.assertEqual(stats["race_entries"], 4)
         self.assertEqual(stats["finishes"], 0)
+
+
+class TestTimestampMigration(unittest.TestCase):
+    """0.5.2: Schraegstrich-Zeitstempel ('YYYY/MM/DD ...') aus aelteren
+    Versionen werden beim Oeffnen normalisiert; der Datums-Filter greift."""
+
+    def setUp(self):
+        self.tmp = tempfile.TemporaryDirectory()
+        self.path = os.path.join(self.tmp.name, "migrate.db")
+
+    def tearDown(self):
+        self.tmp.cleanup()
+
+    def _insert_legacy(self):
+        import sqlite3
+        conn = sqlite3.connect(self.path)
+        conn.execute(
+            "INSERT INTO sessions (digest, session_type, timestamp, track,"
+            " layout, source_file) VALUES ('d1', 'Practice',"
+            " '2026/11/09 20:44:53', 'Monza', '', 'leg.txt')")
+        conn.commit()
+        conn.close()
+
+    def test_migration_normalizes_legacy_rows(self):
+        from rrc.database import _SCHEMA
+        import sqlite3
+        conn = sqlite3.connect(self.path)
+        conn.executescript(_SCHEMA)
+        conn.commit()
+        conn.close()
+        self._insert_legacy()
+        db = Database(self.path)
+        rows = db.sessions()
+        self.assertEqual(len(rows), 1)
+        self.assertEqual(rows[0]["timestamp"], "2026-11-09 20:44:53")
+        db.close()
+
+    def test_date_filter_matches_sessions(self):
+        db = Database(self.path)
+        db.ingest_folder(SAMPLES)
+        rows = db.sessions(date_from="2023-06-01", date_to="2023-06-30")
+        self.assertTrue(rows, "Datums-Filter muss die SP-Sitzung finden")
+        for r in rows:
+            self.assertNotIn("/", r["timestamp"])
+        # Zeitraum ausserhalb -> leer
+        self.assertEqual(db.sessions(date_from="2024-01-01"), [])
+        db.close()

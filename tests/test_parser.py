@@ -4,7 +4,7 @@ import unittest
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
 
-from rrc.parser import (datetime_from_filename, parse_file, parse_sp_json, session_type_from_filename)
+from rrc.parser import (datetime_from_filename, normalize_timestamp, parse_file, parse_sp_json, session_type_from_filename)
 from rrc.models import format_time_ms
 
 SAMPLES = os.path.join(os.path.dirname(__file__), "..", "samples")
@@ -24,6 +24,17 @@ class TestHelpers(unittest.TestCase):
         self.assertEqual(format_time_ms(0), "")
         self.assertEqual(format_time_ms(None), "")
 
+    def test_normalize_timestamp(self):
+        # 0.5.2: RaceRoom header.time ('YYYY/MM/DD HH:MM:SS') normalisieren
+        self.assertEqual(normalize_timestamp("2026/11/09 20:44:53"),
+                         "2026-11-09 20:44:53")
+        self.assertEqual(normalize_timestamp("2026-11-09 20:44:53"),
+                         "2026-11-09 20:44:53")
+        # unbekannte/leere Formate bleiben unangetastet
+        self.assertEqual(normalize_timestamp(""), "")
+        self.assertEqual(normalize_timestamp("2026/13/40 99:99:99"),
+                         "2026/13/40 99:99:99")
+
 
 class TestSpJson(unittest.TestCase):
     def setUp(self):
@@ -33,7 +44,9 @@ class TestSpJson(unittest.TestCase):
 
     def test_header(self):
         self.assertEqual(self.sess.session_type, "Race1")
-        self.assertEqual(self.sess.timestamp, "2023/06/03 14:13:45")
+        # 0.5.2: Zeitstempel normalisiert (Bindestriche statt Schraegstriche)
+        self.assertEqual(self.sess.timestamp, "2023-06-03 14:13:45")
+        self.assertNotIn("/", self.sess.timestamp)
         self.assertEqual(self.sess.track, "Nordschleife")
         self.assertEqual(self.sess.layout, "VLN-Gesamtstrecke")
         self.assertTrue(self.sess.digest)

@@ -920,12 +920,15 @@ class MainWindow(QtWidgets.QMainWindow):
         self.dte_to.setEnabled(checked)
 
     def _style_calendar(self, cal):
-        """0.5.1: Kalender lesbar machen (Kontrast, Größe, „Heute“)."""
+        """0.5.1/0.5.2: Kalender lesbar machen (Kontrast, Größe, „Heute“,
+        Wochentagskopf vollständig, Rand-Tage ausblenden)."""
         cal.setVerticalHeaderFormat(QtWidgets.QCalendarWidget.ISOWeekNumbers)
         cal.setHorizontalHeaderFormat(QtWidgets.QCalendarWidget.ShortDayNames)
         # Mindestgröße: jede Tagesspalte muss zweistellige Zahlen fassen
-        # (Marcels Screenshot: „10“ ff. waren abgeschnitten).
-        cal.setMinimumSize(330, 250)
+        # (Marcels Screenshot: „10“ ff. waren abgeschnitten); 0.5.2: etwas
+        # breiter, damit die Wochentagskopfzeile (Mo…So) nicht mit „…“
+        # abgekürzt wird.
+        cal.setMinimumSize(360, 250)
         cal.setFont(QtGui.QFont("Segoe UI", 10))
         # Werktage reinweiß und fett, Wochenende kräftig hellrot
         _wk = QtGui.QTextCharFormat()
@@ -939,16 +942,36 @@ class MainWindow(QtWidgets.QMainWindow):
             cal.setWeekdayTextFormat(_day, _wk)
         for _day in (QtCore.Qt.Saturday, QtCore.Qt.Sunday):
             cal.setWeekdayTextFormat(_day, _wknd)
-        # Kopfzeile (Wochentage/Kalenderwochen) hell und lesbar
+        # Kopfzeile (Wochentage/Kalenderwochen) hell, lesbar und kompakt;
+        # 0.5.2: 9 pt, damit „Mo“ bis „So“ sicher in die Spalten passen.
         _head = QtGui.QTextCharFormat()
         _head.setForeground(QtGui.QColor("#c9c9d2"))
         _head.setFontWeight(QtGui.QFont.DemiBold)
+        _head.setFontPointSize(9)
         cal.setHeaderTextFormat(_head)
-        # „Heute“: gelbe, fette Zahl (Rahmen stellt QTextCharFormat nicht bereit)
+        # 0.5.2: Rand-Tage (Vormonat/Folgemonat) ausblenden und „Heute“
+        # gelb hervorheben; beim Blättern neu anwenden.
+        cal.currentPageChanged.connect(
+            lambda *_a, _c=cal: self._calendar_apply_dates(_c))
+        self._calendar_apply_dates(cal)
+
+    def _calendar_apply_dates(self, cal):
+        """0.5.2: „Heute“ gelb/fett; Tage außerhalb des angezeigten Monats
+        unsichtbar schalten (Marcels Wunsch: „ganz ausblenden“)."""
+        # alle Datums-Formate zurücksetzen (ungültiges QDate löscht alle)
+        cal.setDateTextFormat(QtCore.QDate(), QtGui.QTextCharFormat())
         _today = QtGui.QTextCharFormat()
         _today.setForeground(QtGui.QColor("#e8c34a"))
         _today.setFontWeight(QtGui.QFont.Bold)
         cal.setDateTextFormat(QtCore.QDate.currentDate(), _today)
+        _inv = QtGui.QTextCharFormat()
+        _inv.setForeground(QtGui.QBrush(QtCore.Qt.transparent))
+        first = QtCore.QDate(cal.yearShown(), cal.monthShown(), 1)
+        for _d in range(1, first.dayOfWeek()):
+            cal.setDateTextFormat(first.addDays(-_d), _inv)
+        last = first.addMonths(1).addDays(-1)
+        for _d in range(1, 8 - last.dayOfWeek()):
+            cal.setDateTextFormat(last.addDays(_d), _inv)
 
     def _reload_filter_combos(self):
         """Strecken-/Fahrzeug-Filter neu laden, Auswahl möglichst behalten."""

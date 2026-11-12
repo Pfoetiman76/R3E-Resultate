@@ -75,6 +75,22 @@ def session_type_from_filename(filename: str) -> str:
     return ""
 
 
+def normalize_timestamp(ts: str) -> str:
+    """0.5.2: RaceRoom-Ergebnisdateien tragen header.time als
+    'YYYY/MM/DD HH:MM:SS' (Schrägstriche). Damit der Datums-Filter der
+    Sitzungsliste greift, wird auf 'YYYY-MM-DD HH:MM:SS' normalisiert;
+    unbekannte Formate bleiben unverändert."""
+    ts = str(ts or "").strip()
+    if "/" not in ts:
+        return ts
+    try:
+        import time
+        return time.strftime("%Y-%m-%d %H:%M:%S",
+                             time.strptime(ts, "%Y/%m/%d %H:%M:%S"))
+    except ValueError:
+        return ts
+
+
 def datetime_from_filename(filename: str) -> str:
     m = _FILENAME_RE.match(os.path.basename(filename))
     if not m:
@@ -95,7 +111,7 @@ def parse_sp_json(data: dict, filename: str = "") -> Session:
     """
     header = data.get("header") or {}
     event = data.get("event") or {}
-    ts = str(_first(header, "time", default="") or "")
+    ts = normalize_timestamp(str(_first(header, "time", default="") or ""))
     if not ts and filename:
         ts = datetime_from_filename(filename)
 

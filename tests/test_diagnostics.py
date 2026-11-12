@@ -37,7 +37,7 @@ class DiagnosticsReportTest(unittest.TestCase):
             (session_id, 1, driver, vehicle, best_ms, vehicle_class, ai))
 
     def test_version_bump(self):
-        self.assertEqual(APP_VERSION, "0.5.1")
+        self.assertEqual(APP_VERSION, "0.5.2")
 
     def test_report_contains_median_and_outlier(self):
         sid = self._add_session(1000)
