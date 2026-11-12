@@ -18,6 +18,7 @@ from datetime import datetime
 from . import fuelcalc
 from . import livelaps
 from . import trackids
+from .livetab import LiveState, sectors_to_ms
 from .raceroom_sm import R3EReader
 
 
@@ -32,6 +33,8 @@ class LapRecorder:
         self.store = livelaps.load_store(self.path)
         self.current = None
         self.n_new_laps = 0
+        # 0.6.0: Darstellungszustand fuer den Reiter „Live"
+        self.live = LiveState()
 
     # ----- Sitzungsverwaltung ------------------------------------------------
     def _new_session(self, s):
@@ -112,12 +115,16 @@ class LapRecorder:
         except Exception as e:
             if self.current:
                 self._close_session()
+                self.live.update(None, f"Aufzeichnung beendet ({e})")
                 return "closed", f"Aufzeichnung beendet ({e})"
+            self.live.update(None, str(e))
             return "error", str(e)
         if s is None or not s.in_car:
             if self.current:
                 self._close_session()
+                self.live.update(None, "Sitzung beendet")
                 return "closed", "Sitzung beendet, Aufzeichnung gespeichert"
+            self.live.update(None, "Warte auf RaceRoom-Sitzung …")
             return "idle", "Warte auf RaceRoom-Sitzung …"
         if self.current and self._identity(s) != self._identity(self.current):
             self._close_session()
@@ -130,17 +137,23 @@ class LapRecorder:
         cur["fuel"]["capacity"] = s.fuel_capacity or cur["fuel"]["capacity"]
         if s.completed_laps > len(cur["laps"]):
             # Neuer Wert: Runde abgeschlossen; Zeit der VORHERIGEN Runde
-            # steht in lap_time_previous_self (Sekunden).
+            # steht in lap_time_previous_self (Sekunden), ihre Sektoren-
+            # Einzelseiten in sector_time_previous_self (0.6.0).
             t_ms = int(round(s.lap_time_previous_s * 1000.0))
             lap_no = len(cur["laps"]) + 1
             valid = 1 if s.prev_lap_valid else 0
             rec = {"lap_no": lap_no, "time_ms": t_ms,
                    "valid": valid,
+                   "sectors_ms": sectors_to_ms(getattr(s, "sector_previous", None)),
                    "ts": datetime.fromtimestamp(self._clock()).strftime("%Y-%m-%d %H:%M:%S"),
                    "fuel_after": s.fuel_left if s.fuel_left >= 0 else -1}
             cur["laps"].append(rec)
             self.n_new_laps += 1
             livelaps.save_store(self.path, self.store)
+            self.live.update(s, "")
+            self.live.set_laps(cur["laps"])
             return "ok", (f"Runde {lap_no}: {t_ms / 1000.0:.3f} s"
                           + ("" if valid else " (ungültig)"))
+        self.live.update(s, "")
+        self.live.set_laps(cur["laps"])
         return "ok", ""

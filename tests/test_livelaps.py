@@ -43,7 +43,7 @@ def _sess(ts="2026/11/07 20:44:53", laps=None):
 class TestLivelaps(unittest.TestCase):
 
     def test_version(self):
-        self.assertEqual(APP_VERSION, "0.5.2")
+        self.assertEqual(APP_VERSION, "0.6.0")
 
     def test_store_roundtrip(self):
         with tempfile.TemporaryDirectory() as td:

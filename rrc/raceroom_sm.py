@@ -459,13 +459,22 @@ _SESSION_TYPE_NAMES = {0: "Practice", 1: "Qualify", 2: "Race", 3: "Warmup"}
 
 
 class LiveSample:
-    """Schlanke Momentaufnahme der fuer die Aufzeichnung relevanten Werte."""
+    """Schlanke Momentaufnahme der fuer die Aufzeichnung relevanten Werte.
+
+    0.6.0: zusaetzlich Position/Streckenmeter/Geschwindigkeit fuer die
+    Streckenkarte sowie Laufzeit-/Sektor-/Delta-Werte fuer den Live-Tab.
+    Sektorzeiten liegen als 3er-Liste vor (Sekunden; None = nicht gesetzt).
+    """
 
     __slots__ = ("version", "in_menus", "in_replay", "in_car",
                  "session_type", "track_name", "layout_name", "track_id",
                  "layout_id", "player_name", "model_id", "completed_laps",
                  "lap_time_previous_s", "prev_lap_valid",
-                 "fuel_left", "fuel_capacity", "fuel_per_lap")
+                 "fuel_left", "fuel_capacity", "fuel_per_lap",
+                 "lap_time_current_s", "lap_time_best_s", "delta_best_s",
+                 "sector_current", "sector_previous", "sector_best",
+                 "sector_starts", "track_sector",
+                 "pos_x", "pos_z", "lap_dist_m", "lap_dist_fr", "speed")
 
     def __init__(self, **kw):
         for k in self.__slots__:
@@ -547,6 +556,11 @@ class R3EReader:
         return k32
 
     # ----- Auswertung -------------------------------------------------------
+    @staticmethod
+    def _secs3(arr):
+        """3 Sektorzeiten (Sekunden) aus dem Shared Memory; -1 -> None."""
+        return [(_pos(v) if _pos(v) > 0 else None) for v in arr]
+
     def read(self):
         """LiveSample liefern; None, wenn kein Rennen laeuft (Menus/Replay)."""
         d = R3EShared.from_buffer_copy(self._read_raw())
@@ -588,6 +602,24 @@ class R3EReader:
             fuel_left=_pos(d.fuel_left),
             fuel_capacity=_pos(d.fuel_capacity),
             fuel_per_lap=_pos(d.fuel_per_lap),
+            # 0.6.0: Werte fuer den Live-Tab (Karte, Kacheln, Sektoren)
+            lap_time_current_s=_pos(d.lap_time_current_self),
+            lap_time_best_s=(_pos(d.lap_time_best_self)
+                             if _pos(d.lap_time_best_self) > 0 else None),
+            delta_best_s=(_f(d.time_delta_best_self)
+                          if _f(d.time_delta_best_self) != 0.0 else None),
+            sector_current=self._secs3(d.sector_time_current_self),
+            sector_previous=self._secs3(d.sector_time_previous_self),
+            sector_best=self._secs3(d.sector_time_best_self),
+            sector_starts=[_f(d.sector_start_factors.sector1),
+                           _f(d.sector_start_factors.sector2),
+                           _f(d.sector_start_factors.sector3)],
+            track_sector=int(d.track_sector),
+            pos_x=_f(d.player.position.x),
+            pos_z=_f(d.player.position.z),
+            lap_dist_m=_pos(d.lap_distance),
+            lap_dist_fr=_pos(d.lap_distance_fraction),
+            speed=_pos(d.car_speed),
         )
 
 

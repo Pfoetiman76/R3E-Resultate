@@ -27,6 +27,7 @@ from rrc import icon_gen
 from rrc.charts import LineChartWidget
 from rrc.database import Database
 from rrc.models import APP_NAME, APP_VERSION, delta_class, format_time_ms
+from rrc.livetab import fmt_lap_ms, fmt_sector_s
 from rrc.paths import default_app_dir, default_results_dir, default_db_path
 from rrc.theme import apply_dark_theme
 
@@ -330,6 +331,73 @@ class LapTableModel(GenericTableModel):
         self.endResetModel()
 
 
+class LiveTableModel(GenericTableModel):
+    """Tabelle mit optionalen Zellfarben (Live-Tab, 0.6.0)."""
+
+    def __init__(self, columns, mono_cols=()):
+        super().__init__(columns, [], mono_cols=mono_cols)
+        self.colors = {}
+
+    def data(self, index, role=QtCore.Qt.DisplayRole):
+        if role == QtCore.Qt.ForegroundRole:
+            c = self.colors.get((index.row(), index.column()))
+            return QtGui.QColor(c) if c else None
+        return super().data(index, role)
+
+    def set_rows(self, rows, colors=None):
+        self.beginResetModel()
+        self.rows = rows
+        self.colors = colors or {}
+        self.endResetModel()
+
+
+class TrackMapWidget(QtWidgets.QWidget):
+    """Streckenkarte (0.6.0): gefahrene Linie + aktuelle Position."""
+
+    def __init__(self):
+        super().__init__()
+        self.setMinimumHeight(220)
+        self._points = []
+        self._pos = None
+
+    def set_data(self, points, pos):
+        self._points = points or []
+        self._pos = pos
+        self.update()
+
+    def paintEvent(self, _ev):
+        p = QtGui.QPainter(self)
+        p.fillRect(self.rect(), QtGui.QColor("#16161c"))
+        w = max(10, self.width() - 24)
+        h = max(10, self.height() - 24)
+        ox, oy = 12, 12
+        if len(self._points) >= 2:
+            p.setPen(QtGui.QPen(QtGui.QColor("#6a6a76"), 2))
+            pts = [QtCore.QPointF(ox + x * w, oy + y * h)
+                   for x, y in self._points]
+            poly = QtGui.QPolygonF(pts)
+            first, last = pts[0], pts[-1]
+            gap = ((first.x() - last.x()) ** 2
+                   + (first.y() - last.y()) ** 2) ** 0.5
+            if gap < 40:               # Rundenumfang weitgehend erfasst
+                poly.append(first)
+            p.drawPolyline(poly)
+        if self._pos is not None:
+            p.setPen(QtCore.Qt.NoPen)
+            p.setBrush(QtGui.QColor("#e8212b"))
+            p.drawEllipse(QtCore.QPointF(ox + self._pos[0] * w,
+                                         oy + self._pos[1] * h), 5, 5)
+        else:
+            p.setPen(QtGui.QColor("#9a9aa4"))
+            p.drawText(self.rect(), QtCore.Qt.AlignCenter,
+                       "Streckenlinie bildet sich beim Fahren …")
+        p.end()
+
+
+COL_LIVE_LAPS = ["Lap", "Zeit", "S1", "S2", "S3", "Kraftstoff", "Status"]
+COL_LIVE_SECTORS = ["Sektion", "Aktuell", "Letzte", "Beste"]
+
+
 class MainWindow(QtWidgets.QMainWindow):
     def __init__(self):
         super().__init__()
@@ -376,6 +444,7 @@ class MainWindow(QtWidgets.QMainWindow):
         self.setCentralWidget(self.tabs)
         self._build_sessions_tab()
         self._build_laps_tab()
+        self._build_live_tab()
         self._build_bests_tab()
         self._build_stats_tab()
         self._build_aggregate_tab()
@@ -571,6 +640,206 @@ class MainWindow(QtWidgets.QMainWindow):
         self.tbl_laps.horizontalHeader().setStretchLastSection(True)
         v.addWidget(self.tbl_laps, 1)
         self.tabs.addTab(page, "Runden")
+
+    def _build_live_tab(self):
+        """Reiter „Live" (0.6.0): laufende Sitzung mit Karte und Kacheln.
+
+        Sichtbar nur bei laufender Aufzeichnung und RaceRoom-Daten;
+        sonst Statusmeldung wie im Recorder-Menue.
+        """
+        page = QtWidgets.QWidget()
+        v = QtWidgets.QVBoxLayout(page)
+
+        # Kopfzeile: Strecke/Layout/Typ + LIVE-Kennung
+        head = QtWidgets.QHBoxLayout()
+        self.lbl_live_track = QtWidgets.QLabel("Keine laufende Sitzung")
+        self.lbl_live_track.setObjectName("sectionTitle")
+        head.addWidget(self.lbl_live_track)
+        head.addStretch(1)
+        self.lbl_live_badge = QtWidgets.QLabel("LIVE")
+        self.lbl_live_badge.setStyleSheet(
+            "color: #16161c; background: #e8212b; font-weight: 800; "
+            "padding: 2px 10px; border-radius: 3px;")
+        self.lbl_live_badge.setVisible(False)
+        head.addWidget(self.lbl_live_badge)
+        v.addLayout(head)
+
+        # Statusmeldung im Ruhezustand
+        self.lbl_live_status = QtWidgets.QLabel("")
+        self.lbl_live_status.setAlignment(QtCore.Qt.AlignCenter)
+        self.lbl_live_status.setStyleSheet("color: #9a9aa4; font-size: 13px;")
+        self.lbl_live_status.setVisible(False)
+        v.addWidget(self.lbl_live_status, 1)
+
+        self.live_content = QtWidgets.QWidget()
+        lv = QtWidgets.QVBoxLayout(self.live_content)
+        lv.setContentsMargins(0, 0, 0, 0)
+
+        # Kachelreihe: laufende/letzte Runde, Bestzeit, Delta, Kraftstoff
+        tiles = QtWidgets.QHBoxLayout()
+        self.live_tiles = {}
+
+        def tile(key, sub=""):
+            box = QtWidgets.QFrame()
+            box.setFixedHeight(84)
+            box.setStyleSheet(
+                "QFrame { background: #202027; border: 1px solid #33333d; }")
+            lay = QtWidgets.QVBoxLayout(box)
+            k = QtWidgets.QLabel(key)
+            k.setStyleSheet("color: #9a9aa4; font-size: 11px; font-weight: 700;"
+                            " background: transparent;")
+            val = QtWidgets.QLabel("–")
+            val.setStyleSheet("color: #e8e8ec; font-size: 19px; font-weight: 800;"
+                              " background: transparent;")
+            s = QtWidgets.QLabel(sub)
+            s.setStyleSheet("color: #9a9aa4; font-size: 11px;"
+                           " background: transparent;")
+            lay.addWidget(k)
+            lay.addWidget(val)
+            lay.addWidget(s)
+            tiles.addWidget(box)
+            self.live_tiles[key] = (val, s)
+
+        tile("Laufende Runde", "Runde –")
+        tile("Letzte Runde", "")
+        tile("Sitzungs-Bestzeit", "")
+        tile("Live-Delta", "zur eigenen Bestzeit")
+        tile("Kraftstoff", "l im Tank")
+        lv.addLayout(tiles)
+
+        # Karte + Sektoren nebeneinander
+        mid = QtWidgets.QHBoxLayout()
+        self.live_map = TrackMapWidget()
+        mid.addWidget(self.live_map, 3)
+        sect_box = QtWidgets.QWidget()
+        sect_lay = QtWidgets.QVBoxLayout(sect_box)
+        sect_lay.setContentsMargins(0, 0, 0, 0)
+        lbl_sect = QtWidgets.QLabel("Sektorzeiten (Sekunden):")
+        lbl_sect.setObjectName("sectionTitle")
+        sect_lay.addWidget(lbl_sect)
+        self.sector_model = LiveTableModel(COL_LIVE_SECTORS,
+                                          mono_cols=(1, 2, 3))
+        self.tbl_live_sectors = QtWidgets.QTableView()
+        self.tbl_live_sectors.setAlternatingRowColors(False)
+        self.tbl_live_sectors.setModel(self.sector_model)
+        self.tbl_live_sectors.horizontalHeader().setStretchLastSection(True)
+        self.tbl_live_sectors.verticalHeader().setVisible(False)
+        self.tbl_live_sectors.setMaximumWidth(460)
+        sect_lay.addWidget(self.tbl_live_sectors)
+        mid.addWidget(sect_box, 2)
+        lv.addLayout(mid, 3)
+
+        # Live-Rundenliste
+        lbl_laps = QtWidgets.QLabel("Runden dieser Sitzung:")
+        lbl_laps.setObjectName("sectionTitle")
+        lv.addWidget(lbl_laps)
+        self.live_laps_model = LiveTableModel(COL_LIVE_LAPS,
+                                              mono_cols=(1, 2, 3, 4, 5))
+        self.tbl_live_laps = QtWidgets.QTableView()
+        self.tbl_live_laps.setAlternatingRowColors(False)
+        self.tbl_live_laps.setModel(self.live_laps_model)
+        self.tbl_live_laps.horizontalHeader().setStretchLastSection(True)
+        self.tbl_live_laps.verticalHeader().setVisible(False)
+        lv.addWidget(self.tbl_live_laps, 2)
+
+        v.addWidget(self.live_content, 4)
+        self.tabs.addTab(page, "Live")
+
+    def _refresh_live_tab(self):
+        """Live-Tab aus dem Recorder-Zustand aktualisieren (10 Hz)."""
+        rec = self.recorder
+        if rec is None or not self.act_record.isChecked():
+            self.live_content.setVisible(False)
+            self.lbl_live_badge.setVisible(False)
+            self.lbl_live_status.setVisible(True)
+            self.lbl_live_status.setText(
+                "Aufzeichnung aus — bitte „Werkzeuge → Runden live aufzeichnen“ "
+                "aktivieren.")
+            self.lbl_live_track.setText("Keine laufende Sitzung")
+            return
+        st = rec.live
+        if not st.active:
+            self.live_content.setVisible(False)
+            self.lbl_live_badge.setVisible(False)
+            self.lbl_live_status.setVisible(True)
+            self.lbl_live_status.setText(
+                st.status or "Warte auf RaceRoom-Sitzung …")
+            self.lbl_live_track.setText("Keine laufende Sitzung")
+            return
+        self.lbl_live_status.setVisible(False)
+        self.live_content.setVisible(True)
+        self.lbl_live_badge.setVisible(True)
+        self.lbl_live_track.setText(
+            f"{st.track_label} · {st.session_type}")
+
+        def set_tile(key, value, sub=""):
+            val, s = self.live_tiles[key]
+            val.setText(value)
+            s.setText(sub)
+
+        set_tile("Laufende Runde",
+                 fmt_lap_ms(int((st.current_lap_s or 0) * 1000)) or "0.000",
+                 f"Runde {st.lap_no + 1}")
+        if st.last_lap_ms:
+            set_tile("Letzte Runde", fmt_lap_ms(st.last_lap_ms),
+                     "gültig" if st.last_lap_valid else "ungültig")
+        else:
+            set_tile("Letzte Runde", "–", "")
+        set_tile("Sitzungs-Bestzeit",
+                 fmt_lap_ms(st.best_lap_ms) or "–", "")
+        if st.delta_best_s is None:
+            set_tile("Live-Delta", "–", "zur eigenen Bestzeit")
+        else:
+            d = st.delta_best_s
+            set_tile("Live-Delta",
+                     f"{'+' if d >= 0 else '−'}{abs(d):.3f}",
+                     "zur eigenen Bestzeit")
+            val, _s = self.live_tiles["Live-Delta"]
+            val.setStyleSheet(
+                "color: %s; font-size: 19px; font-weight: 800; "
+                "background: transparent;"
+                % ("#4caf50" if d <= 0 else "#ff5a63"))
+        fuel = st.fuel_left
+        if fuel is None:
+            set_tile("Kraftstoff", "–", "l im Tank")
+        else:
+            left = st.fuel_laps_left()
+            set_tile("Kraftstoff", f"{fuel:.1f}",
+                     (f"l im Tank · ~{left:.1f} Runden"
+                      if left is not None else "l im Tank"))
+
+        # Sektortabelle
+        rows, colors = [], {}
+        for i, sec in enumerate(("S1", "S2", "S3")):
+            rows.append([sec,
+                         fmt_sector_s(st.sector_current[i]),
+                         fmt_sector_s(st.sector_previous[i]),
+                         fmt_sector_s(st.sector_best[i])])
+            if st.sector_best[i]:
+                colors[(i, 3)] = "#4caf50"
+        self.sector_model.set_rows(rows, colors)
+
+        # Karte
+        self.live_map.set_data(st.map.normalized(), st.pos_norm)
+
+        # Rundenliste (neueste oben; ungueltige rot, Bestzeit gruen)
+        rows, colors = [], {}
+        for r, lap in enumerate(st.laps):
+            secs = lap["sectors_ms"]
+            fuel_txt = ("–" if lap["fuel_after"] is None or lap["fuel_after"] < 0
+                        else f"{lap['fuel_after']:.1f} l")
+            status = "Bestzeit" if lap["best"] else (
+                "ungültig" if not lap["valid"] else "")
+            rows.append([lap["lap_no"], fmt_lap_ms(lap["time_ms"]) or "–",
+                         *(fmt_lap_ms(s) if s and s > 0 else "–" for s in secs),
+                         fuel_txt, status])
+            if lap["best"]:
+                for c in range(len(COL_LIVE_LAPS)):
+                    colors[(r, c)] = "#e8c34a"
+            elif not lap["valid"]:
+                for c in range(len(COL_LIVE_LAPS)):
+                    colors[(r, c)] = "#f44336"
+        self.live_laps_model.set_rows(rows, colors)
 
     def _build_bests_tab(self):
         page = QtWidgets.QWidget()
@@ -820,6 +1089,7 @@ class MainWindow(QtWidgets.QMainWindow):
                 self.recorder = None
             self.statusBar().showMessage(
                 "Live-Aufzeichnung beendet.", 8000)
+        self._refresh_live_tab()
 
     def _recorder_tick(self):
         """Timer-Rückruf (10 Hz): ein Shared-Memory-Lesevorgang."""
@@ -832,6 +1102,7 @@ class MainWindow(QtWidgets.QMainWindow):
             self.statusBar().showMessage(msg, 4000)
         elif msg:
             self.statusBar().showMessage(msg, 6000)
+        self._refresh_live_tab()
 
     def open_fuel_calculator(self):
         dlg = FuelCalculatorDialog(self.db, self)

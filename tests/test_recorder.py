@@ -43,7 +43,7 @@ class FakeReader:
 class TestLapRecorder(unittest.TestCase):
 
     def test_version(self):
-        self.assertEqual(APP_VERSION, "0.5.2")
+        self.assertEqual(APP_VERSION, "0.6.0")
 
     def test_runde_wird_gespeichert(self):
         from rrc.recorder import LapRecorder

@@ -31,7 +31,7 @@ class TestDedupe(unittest.TestCase):
         self.tmp.cleanup()
 
     def test_version(self):
-        self.assertEqual(APP_VERSION, "0.5.2")
+        self.assertEqual(APP_VERSION, "0.6.0")
 
     def _insert_raw(self, digest, track, layout, vehicle=""):
         """Historischen Zustand direkt nachbilden (vor 0.4.13 konnten
