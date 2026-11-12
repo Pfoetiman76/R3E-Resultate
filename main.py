@@ -394,6 +394,20 @@ class MainWindow(QtWidgets.QMainWindow):
         self.chk_hide_ai.blockSignals(True)
         self.chk_hide_ai.setChecked(bool(self.settings.get("hide_ai")))
         self.chk_hide_ai.blockSignals(False)
+
+        # 0.5.0: Live-Recorder (Runden + Kraftstoff aus dem Shared
+        # Memory). Laeuft nur, wenn der Haken gesetzt ist; der Zustand
+        # bleibt ueber Neustarts erhalten.
+        self.recorder = None
+        self.record_timer = QtCore.QTimer(self)
+        self.record_timer.setInterval(100)
+        self.record_timer.timeout.connect(self._recorder_tick)
+        self.act_record.blockSignals(True)
+        self.act_record.setChecked(bool(self.settings.get("record_laps")))
+        self.act_record.blockSignals(False)
+        if self.settings.get("record_laps"):
+            self.toggle_recording(True)
+
         self.rescan(silent=True)
         if n_dup:
             self.statusBar().showMessage(
@@ -761,6 +775,11 @@ class MainWindow(QtWidgets.QMainWindow):
         act_diag = QtGui.QAction("Diagnose exportieren …", self)
         act_diag.triggered.connect(self.export_diagnostics)
         mw.addAction(act_diag)
+        mw.addSeparator()
+        self.act_record = QtGui.QAction("Runden live aufzeichnen", self)
+        self.act_record.setCheckable(True)
+        self.act_record.toggled.connect(self.toggle_recording)
+        mw.addAction(self.act_record)
 
         mh = self.menuBar().addMenu("&Hilfe")
         act_update = QtGui.QAction("Nach Updates suchen …", self)
@@ -771,6 +790,48 @@ class MainWindow(QtWidgets.QMainWindow):
         mh.addAction(act_about)
 
     # ------------------------------------------------------------- Logic --
+
+    def toggle_recording(self, on):
+        """0.5.0: Live-Aufzeichnung ein-/ausschalten (Werkzeuge-Menu)."""
+        self.settings["record_laps"] = bool(on)
+        self._save_settings()
+        if on:
+            if self.recorder is None:
+                try:
+                    from rrc.recorder import LapRecorder
+                    self.recorder = LapRecorder(default_app_dir())
+                except Exception as e:
+                    self.act_record.blockSignals(True)
+                    self.act_record.setChecked(False)
+                    self.act_record.blockSignals(False)
+                    QtWidgets.QMessageBox.warning(
+                        self, APP_NAME,
+                        "Die Live-Aufzeichnung konnte nicht gestartet "
+                        f"werden:\n{e}")
+                    return
+            self.record_timer.start()
+            self.statusBar().showMessage(
+                "Live-Aufzeichnung aktiv — bitte RaceRoom jetzt starten "
+                "bzw. weiterfahren.", 10000)
+        else:
+            self.record_timer.stop()
+            if self.recorder is not None:
+                self.recorder.close()
+                self.recorder = None
+            self.statusBar().showMessage(
+                "Live-Aufzeichnung beendet.", 8000)
+
+    def _recorder_tick(self):
+        """Timer-Rückruf (10 Hz): ein Shared-Memory-Lesevorgang."""
+        if self.recorder is None:
+            self.record_timer.stop()
+            return
+        status, msg = self.recorder.tick()
+        if status == "error" and msg:
+            # Reader-Fehler nur periodisch und dezent melden.
+            self.statusBar().showMessage(msg, 4000)
+        elif msg:
+            self.statusBar().showMessage(msg, 6000)
 
     def open_fuel_calculator(self):
         dlg = FuelCalculatorDialog(self.db, self)
@@ -1023,11 +1084,20 @@ class MainWindow(QtWidgets.QMainWindow):
             # 0.4.14: Ungueltige Runden (lap_time_ms <= 0, z. B. Platzhalter
             # in SP-Dateien) anzeigen, aber rot kennzeichnen und von den
             # Bestwert-Berechnungen ausnehmen.
+            # 0.5.0: Live gemessene ungueltige Runden (valid = 0) zaehlen
+            # ebenfalls nicht als Bestwert, obwohl sie eine Zeit tragen.
             best = min((l["lap_time_ms"] for l in laps
-                        if l["lap_time_ms"] > 0), default=0)
+                        if l["lap_time_ms"] > 0 and l.get("valid", 1)),
+                       default=0)
             for i, l in enumerate(laps):
-                if l["lap_time_ms"] <= 0:
-                    rows.append([l["lap_no"], "–",
+                invalid = (l["lap_time_ms"] <= 0
+                           or (not l.get("valid", 1) and l["lap_time_ms"] > 0))
+                if invalid:
+                    # 0.5.0: Ungueltige Runden mit live gemessener Zeit
+                    # zeigen die gemessene Zeit in Rot, ansonsten "–".
+                    t_txt = (format_time_ms(l["lap_time_ms"])
+                             if l["lap_time_ms"] > 0 else "–")
+                    rows.append([l["lap_no"], t_txt,
                                  format_time_ms(l["s1_ms"]),
                                  format_time_ms(l["s2_ms"]),
                                  format_time_ms(l["s3_ms"]),

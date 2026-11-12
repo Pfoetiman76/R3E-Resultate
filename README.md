@@ -3,7 +3,7 @@
 Eigenständige Begleit-App für **RaceRoom Racing Experience** – im Stil von „ACC Results Companion“:
 Sie liest die von RaceRoom erzeugten Ergebnisdateien automatisch ein und bietet eine dauerhafte Historie aller Sitzungen samt persönlichen Bestzeiten. Optik und Update-Mechanik folgen dem Vorbild von PitBoss R3E.
 
-## Funktionen (Version 0.4.14)
+## Funktionen (Version 0.5.0)
 
 - Überarbeitete Optik: kompakte Tabellen mit feinen Gitterlinien (keine Zebra-Streifen), Zeit- und Delta-Werte in technischer Schrift (Consolas), aktiver Reiter und Auswahl in RaceRoom-Rot, Rekordwerte gelb hervorgehoben, dauerhafte Statusanzeige (Sitzungen · Runden · Datenbank)
 - Automatische Überwachung des RaceRoom-Ergebnisordners (alle 5 Sekunden); neue Sitzungen erscheinen ohne Zutun
@@ -23,6 +23,7 @@ Sie liest die von RaceRoom erzeugten Ergebnisdateien automatisch ein und bietet 
 - Kraftstoffrechner („Werkzeuge → Kraftstoffrechner …“): Bedarfsprognose für Rennen nach Runden oder Minuten
 - Erweiterte Filter in der Sitzungsliste: Zeitraum (Datum von/bis mit Kalenderauswahl, aktivierbar über Haken), Strecke und Fahrzeug; kombinierbar mit Suche, Typ und Fahrer
 - Eigenes App-Symbol (Stoppuhr mit Schriftzug, freigegebene Kombination): Fenster- und Taskleistensymbol; der Installer nutzt es ebenfalls für Programm und Desktop-Verknüpfung
+- Live-Aufzeichnung (0.5.0): über „Werkzeuge → Runden live aufzeichnen“ (Haken) liest die App während der Fahrt den RaceRoom-Speicher aus und notiert jede abgeschlossene Runde mit ihrer gemessenen Zeit — auch ungültige Runden, die das Spiel zwar anzeigt, aber als leere Zeit in die Ergebnisdatei schreibt. Beim Einlesen werden diese Platzhalter mit den live gemessenen Zeiten gefüllt und in der Rundenansicht rot mit der gemessenen Zeit und der Kennzeichnung „ungültig“ angezeigt; Bestzeit-Berechnungen bleiben unberührt. Die Aufzeichnung läuft im Hintergrund (App bitte während der Fahrt geöffnet lassen), der Haken bleibt über Neustarts gespeichert, und die gemessenen Runden werden in `live_laps.json` im App-Ordner gehalten. Der Kraftstoffrechner wird zusätzlich automatisch befüllt: je gefahrener Sitzung werden Verbrauch pro Runde und Tankgröße ermittelt und in `fuel_history.json` eingetragen
 - Runden gesamt / gültig (0.4.14): die Ergebnistabelle zeigt in der Spalte „Runden ges./gültig" beide Werte (z. B. 9 / 3), wenn die Ergebnisdatei mehr Runden angibt als gültige Rundenzeiten enthält — Server-Dateien ohne Gesamtangabe zeigen weiterhin nur eine Zahl; der KI-Platzhalter-Wert wird ausgeschlossen. Die Rundenansicht zeigt zusätzlich alle ungültigen Runden (lückenlose Rundennummerierung) mit roter Kennzeichnung „ungültig"
 - Lesbare Datumsfelder (0.4.14): die Datumsauswahl in der Filterzeile ist jetzt Teil des dunklen Designs — heller Eingabefeld-Hintergrund mit feinem Rahmen und reinweißer Schrift, so wie die übrigen Bedienelemente; das Kalender-Aufklappmenü zeigt alle Tageszahlen reinweiß, Wochenenden hellrot und den gewählten Tag in Rot
 - Diagnose-Export (0.4.13): über „Werkzeuge → Diagnose exportieren …" wird ein Klartext-Bericht erzeugt, der je Strecke den Median aller Bestzeiten sowie die fünf schnellsten Bestzeiten und Runden mit Fahrer, Fahrzeug, Klasse, KI-Kennzeichnung und Quelldatei auflistet — die Grundlage für eine fundierte Ferndiagnose auffälliger Werte
@@ -92,7 +93,7 @@ Klick-Weg: GitHub → **Releases** → **Draft a new release** → Tag `v0.2.0` 
 | `installer/setup.iss` | Inno-Setup-Installer |
 | `installer/r3e_resultate.spec` | PyInstaller-Spezifikation |
 | `.github/workflows/release.yml` | CI: Tests → EXE → Installer → Release |
-| `tests/` | 124 Unit-Tests (Parser, Datenbank, Modelle, Einstellungen, Kraftstoff, Id-Auflösung, Icon, Statistik, Spieldatenbank, SP-Runden, Aggregation, KI-Erkennung, Start-Cache, Duplikat-Bereinigung, Diagnose, Rundenzahlen) |
+| `tests/` | 130 Unit-Tests (Parser, Datenbank, Modelle, Einstellungen, Kraftstoff, Id-Auflösung, Icon, Statistik, Spieldatenbank, SP-Runden, Aggregation, KI-Erkennung, Start-Cache, Duplikat-Bereinigung, Diagnose, Rundenzahlen, Shared-Memory-Reader, Live-Runden, Live-Recorder) |
 
 Tests ausführen: `python -m unittest discover -s tests`
 

@@ -38,7 +38,8 @@ CREATE TABLE IF NOT EXISTS laps (
     lap_time_ms INTEGER DEFAULT 0,
     s1_ms INTEGER DEFAULT 0,
     s2_ms INTEGER DEFAULT 0,
-    s3_ms INTEGER DEFAULT 0
+    s3_ms INTEGER DEFAULT 0,
+    valid INTEGER DEFAULT 1
 );
 CREATE INDEX IF NOT EXISTS idx_entries_session ON entries(session_id);
 CREATE INDEX IF NOT EXISTS idx_entries_name ON entries(name);
@@ -57,7 +58,7 @@ _RACE_LIKE = "Race"
 
 # Stand des Parsers, fuer den der Lese-Cache gueltig ist (0.4.11). Nach
 # Parser-Aenderungen erhoehen, damit alle Dateien einmal neu gelesen werden.
-_PARSER_CACHE_VER = 4
+_PARSER_CACHE_VER = 5
 
 # Bedingung: kein als KI erkannter Fahrer (0.4.10). ai = -1/NULL bedeutet
 # "unbekannt" (Server-/Multiplayer-Formate) und bleibt sichtbar.
@@ -82,6 +83,7 @@ class Database:
         except sqlite3.Error:
             pass
         self._migrate_entries()
+        self._migrate_laps()
         self.conn.commit()
 
     def _migrate_entries(self):
@@ -98,6 +100,14 @@ class Database:
                 self.conn.execute(
                     f"ALTER TABLE entries ADD COLUMN {col} {decl}")
 
+    def _migrate_laps(self):
+        """0.5.0: Spalte 'valid' nachruesten — aeltere Datenbanken bleiben
+        ohne Datenverlust nutzbar."""
+        cols = {r[1] for r in
+                self.conn.execute("PRAGMA table_info(laps)").fetchall()}
+        if "valid" not in cols:
+            self.conn.execute("ALTER TABLE laps ADD COLUMN valid INTEGER DEFAULT 1")
+
     def close(self):
         self.conn.close()
 
@@ -110,6 +120,14 @@ class Database:
         gleicher Parser-Stand) werden uebersprungen – der Start bleibt
         auch bei hunderten Ergebnisdateien schnell."""
         added = skipped = errors = 0
+        # 0.5.0: live gemessene (ungueltige) Runden aus live_laps.json
+        # anreichern, bevor die Sitzungen gespeichert werden.
+        try:
+            from . import livelaps, paths
+            _live = livelaps.load_store(
+                livelaps.store_path(paths.default_app_dir()))
+        except Exception:
+            _live = None
         try:
             names = sorted(os.listdir(folder))
         except OSError:
@@ -139,6 +157,8 @@ class Database:
                 continue
             new = False
             for sess in sessions:
+                if _live is not None:
+                    livelaps.fill_session(sess, _live)
                 if self.insert_session(sess, os.path.abspath(full)):
                     new = True
                     added += 1
@@ -198,12 +218,13 @@ class Database:
                                 (ecur["id"],))
                             self.conn.executemany(
                                 "INSERT INTO laps (entry_id, lap_no, "
-                                "lap_time_ms, s1_ms, s2_ms, s3_ms) "
-                                "VALUES (?,?,?,?,?,?)",
+                                "lap_time_ms, s1_ms, s2_ms, s3_ms, valid) "
+                                "VALUES (?,?,?,?,?,?,?)",
                                 [(ecur["id"], lp.lap_no, lp.lap_time_ms,
                                   (lp.sector_times_ms + [0, 0, 0])[0],
                                   (lp.sector_times_ms + [0, 0, 0])[1],
-                                  (lp.sector_times_ms + [0, 0, 0])[2])
+                                  (lp.sector_times_ms + [0, 0, 0])[2],
+                                  getattr(lp, "valid", 1))
                                  for lp in detail])
                     self.conn.commit()
                     return False
@@ -230,11 +251,12 @@ class Database:
                 if p.laps_detail:
                     self.conn.executemany(
                         "INSERT INTO laps (entry_id, lap_no, lap_time_ms,"
-                        " s1_ms, s2_ms, s3_ms) VALUES (?,?,?,?,?,?)",
+                        " s1_ms, s2_ms, s3_ms, valid) VALUES (?,?,?,?,?,?,?)",
                         [(ecur.lastrowid, lp.lap_no, lp.lap_time_ms,
                           (lp.sector_times_ms + [0, 0, 0])[0],
                           (lp.sector_times_ms + [0, 0, 0])[1],
-                          (lp.sector_times_ms + [0, 0, 0])[2])
+                          (lp.sector_times_ms + [0, 0, 0])[2],
+                          getattr(lp, "valid", 1))
                          for lp in p.laps_detail])
             self.conn.commit()
             return True

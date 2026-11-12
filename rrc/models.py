@@ -1,6 +1,6 @@
 """RaceRoom Results Companion (RRC) - parsed result models."""
 APP_NAME = "RaceRoom Results Companion"
-APP_VERSION = "0.4.14"
+APP_VERSION = "0.5.0"
 
 from dataclasses import dataclass, field
 
@@ -11,6 +11,7 @@ class LapEntry:
     lap_no: int = 0
     lap_time_ms: int = 0
     sector_times_ms: list = field(default_factory=list)
+    valid: int = 1   # 0.5.0: 0 = ungueltig (live gemessen / Platzhalter)
 
 
 @dataclass

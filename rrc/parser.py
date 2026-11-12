@@ -173,7 +173,8 @@ def parse_sp_json(data: dict, filename: str = "") -> Session:
                 n_valid += 1
             elif not artifact and is_ai != 1:
                 laps_detail.append(
-                    LapEntry(_ms(_first(lp, "number", default=0)), -1, []))
+                    LapEntry(_ms(_first(lp, "number", default=0)), -1, [],
+                             valid=0))
         total_laps = _ms(_first(d, "totallaps", "totalLaps", "laps",
                                 default=0))
         if laps_detail:
